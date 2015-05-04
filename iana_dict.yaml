@@ -1,0 +1,1938 @@
+---
+elements:
+    1: 
+      name: "octetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    2: 
+      name: "packetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    3: 
+      name: "deltaFlowCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "flows"
+    4: 
+      name: "protocolIdentifier"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    5: 
+      name: "ipClassOfService"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    6: 
+      name: "tcpControlBits"
+      data_type: "unsigned16"
+      data_semantic: "flags"
+      units: ""
+    7: 
+      name: "sourceTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    8: 
+      name: "sourceIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    9: 
+      name: "sourceIPv4PrefixLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "bits"
+    10: 
+      name: "ingressInterface"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    11: 
+      name: "destinationTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    12: 
+      name: "destinationIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    13: 
+      name: "destinationIPv4PrefixLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "bits"
+    14: 
+      name: "egressInterface"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    15: 
+      name: "ipNextHopIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    16: 
+      name: "bgpSourceAsNumber"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    17: 
+      name: "bgpDestinationAsNumber"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    18: 
+      name: "bgpNextHopIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    19: 
+      name: "postMCastPacketDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    20: 
+      name: "postMCastOctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    21: 
+      name: "flowEndSysUpTime"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "milliseconds"
+    22: 
+      name: "flowStartSysUpTime"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "milliseconds"
+    23: 
+      name: "postOctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    24: 
+      name: "postPacketDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    25: 
+      name: "minimumIpTotalLength"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    26: 
+      name: "maximumIpTotalLength"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    27: 
+      name: "sourceIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    28: 
+      name: "destinationIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    29: 
+      name: "sourceIPv6PrefixLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "bits"
+    30: 
+      name: "destinationIPv6PrefixLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "bits"
+    31: 
+      name: "flowLabelIPv6"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    32: 
+      name: "icmpTypeCodeIPv4"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    33: 
+      name: "igmpType"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    36: 
+      name: "flowActiveTimeout"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: "seconds"
+    37: 
+      name: "flowIdleTimeout"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: "seconds"
+    40: 
+      name: "exportedOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    41: 
+      name: "exportedMessageTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "messages"
+    42: 
+      name: "exportedFlowRecordTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "flows"
+    44: 
+      name: "sourceIPv4Prefix"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    45: 
+      name: "destinationIPv4Prefix"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    46: 
+      name: "mplsTopLabelType"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    47: 
+      name: "mplsTopLabelIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    52: 
+      name: "minimumTTL"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "hops"
+    53: 
+      name: "maximumTTL"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "hops"
+    54: 
+      name: "fragmentIdentification"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    55: 
+      name: "postIpClassOfService"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    56: 
+      name: "sourceMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    57: 
+      name: "postDestinationMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    58: 
+      name: "vlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    59: 
+      name: "postVlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    60: 
+      name: "ipVersion"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    61: 
+      name: "flowDirection"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    62: 
+      name: "ipNextHopIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    63: 
+      name: "bgpNextHopIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    64: 
+      name: "ipv6ExtensionHeaders"
+      data_type: "unsigned32"
+      data_semantic: "flags"
+      units: ""
+    70: 
+      name: "mplsTopLabelStackSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    71: 
+      name: "mplsLabelStackSection2"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    72: 
+      name: "mplsLabelStackSection3"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    73: 
+      name: "mplsLabelStackSection4"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    74: 
+      name: "mplsLabelStackSection5"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    75: 
+      name: "mplsLabelStackSection6"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    76: 
+      name: "mplsLabelStackSection7"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    77: 
+      name: "mplsLabelStackSection8"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    78: 
+      name: "mplsLabelStackSection9"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    79: 
+      name: "mplsLabelStackSection10"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    80: 
+      name: "destinationMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    81: 
+      name: "postSourceMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    82: 
+      name: "interfaceName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    83: 
+      name: "interfaceDescription"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    85: 
+      name: "octetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    86: 
+      name: "packetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    88: 
+      name: "fragmentOffset"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: ""
+    89: 
+      name: "forwardingStatus"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    90: 
+      name: "mplsVpnRouteDistinguisher"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    91: 
+      name: "mplsTopLabelPrefixLength"
+      data_type: "unsigned8"
+      data_semantic: "quantity"
+      units: "bits"
+    92: 
+      name: "srcTrafficIndex"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    93: 
+      name: "dstTrafficIndex"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    94: 
+      name: "applicationDescription"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    95: 
+      name: "applicationId"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    96: 
+      name: "applicationName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    98: 
+      name: "postIpDiffServCodePoint"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    99: 
+      name: "multicastReplicationFactor"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: ""
+    101: 
+      name: "classificationEngineId"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    128: 
+      name: "bgpNextAdjacentAsNumber"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    129: 
+      name: "bgpPrevAdjacentAsNumber"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    130: 
+      name: "exporterIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    131: 
+      name: "exporterIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    132: 
+      name: "droppedOctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    133: 
+      name: "droppedPacketDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    134: 
+      name: "droppedOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    135: 
+      name: "droppedPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    136: 
+      name: "flowEndReason"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    137: 
+      name: "commonPropertiesId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    138: 
+      name: "observationPointId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    139: 
+      name: "icmpTypeCodeIPv6"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    140: 
+      name: "mplsTopLabelIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    141: 
+      name: "lineCardId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    142: 
+      name: "portId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    143: 
+      name: "meteringProcessId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    144: 
+      name: "exportingProcessId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    145: 
+      name: "templateId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    146: 
+      name: "wlanChannelId"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    147: 
+      name: "wlanSSID"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    148: 
+      name: "flowId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    149: 
+      name: "observationDomainId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    150: 
+      name: "flowStartSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    151: 
+      name: "flowEndSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    152: 
+      name: "flowStartMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    153: 
+      name: "flowEndMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    154: 
+      name: "flowStartMicroseconds"
+      data_type: "dateTimeMicroseconds"
+      data_semantic: "default"
+      units: "microseconds"
+    155: 
+      name: "flowEndMicroseconds"
+      data_type: "dateTimeMicroseconds"
+      data_semantic: "default"
+      units: "microseconds"
+    156: 
+      name: "flowStartNanoseconds"
+      data_type: "dateTimeNanoseconds"
+      data_semantic: "default"
+      units: "nanoseconds"
+    157: 
+      name: "flowEndNanoseconds"
+      data_type: "dateTimeNanoseconds"
+      data_semantic: "default"
+      units: "nanoseconds"
+    158: 
+      name: "flowStartDeltaMicroseconds"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "microseconds"
+    159: 
+      name: "flowEndDeltaMicroseconds"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "microseconds"
+    160: 
+      name: "systemInitTimeMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    161: 
+      name: "flowDurationMilliseconds"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "milliseconds"
+    162: 
+      name: "flowDurationMicroseconds"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "microseconds"
+    163: 
+      name: "observedFlowTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "flows"
+    164: 
+      name: "ignoredPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    165: 
+      name: "ignoredOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    166: 
+      name: "notSentFlowTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "flows"
+    167: 
+      name: "notSentPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    168: 
+      name: "notSentOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    169: 
+      name: "destinationIPv6Prefix"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    170: 
+      name: "sourceIPv6Prefix"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    171: 
+      name: "postOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    172: 
+      name: "postPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    173: 
+      name: "flowKeyIndicator"
+      data_type: "unsigned64"
+      data_semantic: "flags"
+      units: ""
+    174: 
+      name: "postMCastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    175: 
+      name: "postMCastOctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    176: 
+      name: "icmpTypeIPv4"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    177: 
+      name: "icmpCodeIPv4"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    178: 
+      name: "icmpTypeIPv6"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    179: 
+      name: "icmpCodeIPv6"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    180: 
+      name: "udpSourcePort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    181: 
+      name: "udpDestinationPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    182: 
+      name: "tcpSourcePort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    183: 
+      name: "tcpDestinationPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    184: 
+      name: "tcpSequenceNumber"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: ""
+    185: 
+      name: "tcpAcknowledgementNumber"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: ""
+    186: 
+      name: "tcpWindowSize"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: ""
+    187: 
+      name: "tcpUrgentPointer"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: ""
+    188: 
+      name: "tcpHeaderLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "octets"
+    189: 
+      name: "ipHeaderLength"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "octets"
+    190: 
+      name: "totalLengthIPv4"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: "octets"
+    191: 
+      name: "payloadLengthIPv6"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: "octets"
+    192: 
+      name: "ipTTL"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "hops"
+    193: 
+      name: "nextHeaderIPv6"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    194: 
+      name: "mplsPayloadLength"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "octets"
+    195: 
+      name: "ipDiffServCodePoint"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    196: 
+      name: "ipPrecedence"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    197: 
+      name: "fragmentFlags"
+      data_type: "unsigned8"
+      data_semantic: "flags"
+      units: ""
+    198: 
+      name: "octetDeltaSumOfSquares"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: ""
+    199: 
+      name: "octetTotalSumOfSquares"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    200: 
+      name: "mplsTopLabelTTL"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "hops"
+    201: 
+      name: "mplsLabelStackLength"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "octets"
+    202: 
+      name: "mplsLabelStackDepth"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "label stack entries"
+    203: 
+      name: "mplsTopLabelExp"
+      data_type: "unsigned8"
+      data_semantic: "flags"
+      units: ""
+    204: 
+      name: "ipPayloadLength"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: "octets"
+    205: 
+      name: "udpMessageLength"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: "octets"
+    206: 
+      name: "isMulticast"
+      data_type: "unsigned8"
+      data_semantic: "flags"
+      units: ""
+    207: 
+      name: "ipv4IHL"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: "4 octets"
+    208: 
+      name: "ipv4Options"
+      data_type: "unsigned32"
+      data_semantic: "flags"
+      units: ""
+    209: 
+      name: "tcpOptions"
+      data_type: "unsigned64"
+      data_semantic: "flags"
+      units: ""
+    210: 
+      name: "paddingOctets"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    211: 
+      name: "collectorIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    212: 
+      name: "collectorIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    213: 
+      name: "exportInterface"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    214: 
+      name: "exportProtocolVersion"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    215: 
+      name: "exportTransportProtocol"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    216: 
+      name: "collectorTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    217: 
+      name: "exporterTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    218: 
+      name: "tcpSynTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    219: 
+      name: "tcpFinTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    220: 
+      name: "tcpRstTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    221: 
+      name: "tcpPshTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    222: 
+      name: "tcpAckTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    223: 
+      name: "tcpUrgTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    224: 
+      name: "ipTotalLength"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    225: 
+      name: "postNATSourceIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    226: 
+      name: "postNATDestinationIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    227: 
+      name: "postNAPTSourceTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    228: 
+      name: "postNAPTDestinationTransportPort"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    229: 
+      name: "natOriginatingAddressRealm"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    230: 
+      name: "natEvent"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    231: 
+      name: "initiatorOctets"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    232: 
+      name: "responderOctets"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    233: 
+      name: "firewallEvent"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    234: 
+      name: "ingressVRFID"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: ""
+    235: 
+      name: "egressVRFID"
+      data_type: "unsigned32"
+      data_semantic: ""
+      units: ""
+    236: 
+      name: "VRFname"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    237: 
+      name: "postMplsTopLabelExp"
+      data_type: "unsigned8"
+      data_semantic: "flags"
+      units: ""
+    238: 
+      name: "tcpWindowScale"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: ""
+    239: 
+      name: "biflowDirection"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    240: 
+      name: "ethernetHeaderLength"
+      data_type: "unsigned8"
+      data_semantic: "quantity"
+      units: "octets"
+    241: 
+      name: "ethernetPayloadLength"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: "octets"
+    242: 
+      name: "ethernetTotalLength"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: "octets"
+    243: 
+      name: "dot1qVlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    244: 
+      name: "dot1qPriority"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    245: 
+      name: "dot1qCustomerVlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    246: 
+      name: "dot1qCustomerPriority"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    247: 
+      name: "metroEvcId"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    248: 
+      name: "metroEvcType"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    249: 
+      name: "pseudoWireId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    250: 
+      name: "pseudoWireType"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    251: 
+      name: "pseudoWireControlWord"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    252: 
+      name: "ingressPhysicalInterface"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    253: 
+      name: "egressPhysicalInterface"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    254: 
+      name: "postDot1qVlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    255: 
+      name: "postDot1qCustomerVlanId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    256: 
+      name: "ethernetType"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    257: 
+      name: "postIpPrecedence"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    258: 
+      name: "collectionTimeMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    259: 
+      name: "exportSctpStreamId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    260: 
+      name: "maxExportSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    261: 
+      name: "maxFlowEndSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    262: 
+      name: "messageMD5Checksum"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    263: 
+      name: "messageScope"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    264: 
+      name: "minExportSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    265: 
+      name: "minFlowStartSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    266: 
+      name: "opaqueOctets"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    267: 
+      name: "sessionScope"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    268: 
+      name: "maxFlowEndMicroseconds"
+      data_type: "dateTimeMicroseconds"
+      data_semantic: "default"
+      units: "microseconds"
+    269: 
+      name: "maxFlowEndMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    270: 
+      name: "maxFlowEndNanoseconds"
+      data_type: "dateTimeNanoseconds"
+      data_semantic: "default"
+      units: "nanoseconds"
+    271: 
+      name: "minFlowStartMicroseconds"
+      data_type: "dateTimeMicroseconds"
+      data_semantic: "default"
+      units: "microseconds"
+    272: 
+      name: "minFlowStartMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    273: 
+      name: "minFlowStartNanoseconds"
+      data_type: "dateTimeNanoseconds"
+      data_semantic: "default"
+      units: "nanoseconds"
+    274: 
+      name: "collectorCertificate"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    275: 
+      name: "exporterCertificate"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    276: 
+      name: "dataRecordsReliability"
+      data_type: "boolean"
+      data_semantic: "default"
+      units: ""
+    277: 
+      name: "observationPointType"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    278: 
+      name: "newConnectionDeltaCount"
+      data_type: "unsigned32"
+      data_semantic: "deltaCounter"
+      units: ""
+    279: 
+      name: "connectionSumDurationSeconds"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "seconds"
+    280: 
+      name: "connectionTransactionId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    281: 
+      name: "postNATSourceIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    282: 
+      name: "postNATDestinationIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: "default"
+      units: ""
+    283: 
+      name: "natPoolId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    284: 
+      name: "natPoolName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    285: 
+      name: "anonymizationFlags"
+      data_type: "unsigned16"
+      data_semantic: "flags"
+      units: ""
+    286: 
+      name: "anonymizationTechnique"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    287: 
+      name: "informationElementIndex"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    288: 
+      name: "p2pTechnology"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    289: 
+      name: "tunnelTechnology"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    290: 
+      name: "encryptedTechnology"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    291: 
+      name: "basicList"
+      data_type: "basicList"
+      data_semantic: "list"
+      units: ""
+    292: 
+      name: "subTemplateList"
+      data_type: "subTemplateList"
+      data_semantic: "list"
+      units: ""
+    293: 
+      name: "subTemplateMultiList"
+      data_type: "subTemplateMultiList"
+      data_semantic: "list"
+      units: ""
+    294: 
+      name: "bgpValidityState"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    295: 
+      name: "IPSecSPI"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    296: 
+      name: "greKey"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    297: 
+      name: "natType"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    298: 
+      name: "initiatorPackets"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    299: 
+      name: "responderPackets"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    300: 
+      name: "observationDomainName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    301: 
+      name: "selectionSequenceId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    302: 
+      name: "selectorId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    303: 
+      name: "informationElementId"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    304: 
+      name: "selectorAlgorithm"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    305: 
+      name: "samplingPacketInterval"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "packets"
+    306: 
+      name: "samplingPacketSpace"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "packets"
+    307: 
+      name: "samplingTimeInterval"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "microseconds"
+    308: 
+      name: "samplingTimeSpace"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "microseconds"
+    309: 
+      name: "samplingSize"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "packets"
+    310: 
+      name: "samplingPopulation"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "packets"
+    311: 
+      name: "samplingProbability"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: ""
+    312: 
+      name: "dataLinkFrameSize"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: ""
+    313: 
+      name: "ipHeaderPacketSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    314: 
+      name: "ipPayloadPacketSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    315: 
+      name: "dataLinkFrameSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    316: 
+      name: "mplsLabelStackSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    317: 
+      name: "mplsPayloadPacketSection"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    318: 
+      name: "selectorIdTotalPktsObserved"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    319: 
+      name: "selectorIdTotalPktsSelected"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    320: 
+      name: "absoluteError"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: "The units of the Information Element for which the error is specified."
+    321: 
+      name: "relativeError"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: ""
+    322: 
+      name: "observationTimeSeconds"
+      data_type: "dateTimeSeconds"
+      data_semantic: "default"
+      units: "seconds"
+    323: 
+      name: "observationTimeMilliseconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    324: 
+      name: "observationTimeMicroseconds"
+      data_type: "dateTimeMicroseconds"
+      data_semantic: "default"
+      units: "microseconds"
+    325: 
+      name: "observationTimeNanoseconds"
+      data_type: "dateTimeNanoseconds"
+      data_semantic: "default"
+      units: "nanoseconds"
+    326: 
+      name: "digestHashValue"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    327: 
+      name: "hashIPPayloadOffset"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    328: 
+      name: "hashIPPayloadSize"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    329: 
+      name: "hashOutputRangeMin"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    330: 
+      name: "hashOutputRangeMax"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    331: 
+      name: "hashSelectedRangeMin"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    332: 
+      name: "hashSelectedRangeMax"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    333: 
+      name: "hashDigestOutput"
+      data_type: "boolean"
+      data_semantic: "default"
+      units: ""
+    334: 
+      name: "hashInitialiserValue"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    335: 
+      name: "selectorName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    336: 
+      name: "upperCILimit"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: ""
+    337: 
+      name: "lowerCILimit"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: ""
+    338: 
+      name: "confidenceLevel"
+      data_type: "float64"
+      data_semantic: "quantity"
+      units: ""
+    339: 
+      name: "informationElementDataType"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    340: 
+      name: "informationElementDescription"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    341: 
+      name: "informationElementName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    342: 
+      name: "informationElementRangeBegin"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    343: 
+      name: "informationElementRangeEnd"
+      data_type: "unsigned64"
+      data_semantic: "quantity"
+      units: ""
+    344: 
+      name: "informationElementSemantics"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    345: 
+      name: "informationElementUnits"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: ""
+    346: 
+      name: "privateEnterpriseNumber"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    347: 
+      name: "virtualStationInterfaceId"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    348: 
+      name: "virtualStationInterfaceName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    349: 
+      name: "virtualStationUUID"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    350: 
+      name: "virtualStationName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    351: 
+      name: "layer2SegmentId"
+      data_type: "unsigned64"
+      data_semantic: "identifier"
+      units: ""
+    352: 
+      name: "layer2OctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    353: 
+      name: "layer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    354: 
+      name: "ingressUnicastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    355: 
+      name: "ingressMulticastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    356: 
+      name: "ingressBroadcastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    357: 
+      name: "egressUnicastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    358: 
+      name: "egressBroadcastPacketTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "packets"
+    359: 
+      name: "monitoringIntervalStartMilliSeconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    360: 
+      name: "monitoringIntervalEndMilliSeconds"
+      data_type: "dateTimeMilliseconds"
+      data_semantic: "default"
+      units: "milliseconds"
+    361: 
+      name: "portRangeStart"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    362: 
+      name: "portRangeEnd"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    363: 
+      name: "portRangeStepSize"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    364: 
+      name: "portRangeNumPorts"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    365: 
+      name: "staMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    366: 
+      name: "staIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    367: 
+      name: "wtpMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    368: 
+      name: "ingressInterfaceType"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    369: 
+      name: "egressInterfaceType"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    370: 
+      name: "rtpSequenceNumber"
+      data_type: "unsigned16"
+      data_semantic: ""
+      units: ""
+    371: 
+      name: "userName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    372: 
+      name: "applicationCategoryName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    373: 
+      name: "applicationSubCategoryName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    374: 
+      name: "applicationGroupName"
+      data_type: "string"
+      data_semantic: "default"
+      units: ""
+    375: 
+      name: "originalFlowsPresent"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "flows"
+    376: 
+      name: "originalFlowsInitiated"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "flows"
+    377: 
+      name: "originalFlowsCompleted"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "flows"
+    378: 
+      name: "distinctCountOfSourceIPAddress"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: ""
+    379: 
+      name: "distinctCountOfDestinationIPAddress"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: ""
+    380: 
+      name: "distinctCountOfSourceIPv4Address"
+      data_type: "unsigned32"
+      data_semantic: "totalCounter"
+      units: ""
+    381: 
+      name: "distinctCountOfDestinationIPv4Address"
+      data_type: "unsigned32"
+      data_semantic: "totalCounter"
+      units: ""
+    382: 
+      name: "distinctCountOfSourceIPv6Address"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: ""
+    383: 
+      name: "distinctCountOfDestinationIPv6Address"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: ""
+    384: 
+      name: "valueDistributionMethod"
+      data_type: "unsigned8"
+      data_semantic: ""
+      units: ""
+    385: 
+      name: "rfc3550JitterMilliseconds"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "milliseconds"
+    386: 
+      name: "rfc3550JitterMicroseconds"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "microseconds"
+    387: 
+      name: "rfc3550JitterNanoseconds"
+      data_type: "unsigned32"
+      data_semantic: "quantity"
+      units: "nanoseconds"
+    388: 
+      name: "dot1qDEI"
+      data_type: "boolean"
+      data_semantic: "default"
+      units: ""
+    389: 
+      name: "dot1qCustomerDEI"
+      data_type: "boolean"
+      data_semantic: "default"
+      units: ""
+    390: 
+      name: "flowSelectorAlgorithm"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    391: 
+      name: "flowSelectedOctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    392: 
+      name: "flowSelectedPacketDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    393: 
+      name: "flowSelectedFlowDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "flows"
+    394: 
+      name: "selectorIDTotalFlowsObserved"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "flows"
+    395: 
+      name: "selectorIDTotalFlowsSelected"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "flows"
+    396: 
+      name: "samplingFlowInterval"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "flows"
+    397: 
+      name: "samplingFlowSpacing"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "flows"
+    398: 
+      name: "flowSamplingTimeInterval"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "microseconds"
+    399: 
+      name: "flowSamplingTimeSpacing"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "microseconds"
+    400: 
+      name: "hashFlowDomain"
+      data_type: "unsigned16"
+      data_semantic: "identifier"
+      units: ""
+    401: 
+      name: "transportOctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    402: 
+      name: "transportPacketDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "packets"
+    403: 
+      name: "originalExporterIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: ""
+      units: ""
+    404: 
+      name: "originalExporterIPv6Address"
+      data_type: "ipv6Address"
+      data_semantic: ""
+      units: ""
+    405: 
+      name: "originalObservationDomainId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    406: 
+      name: "intermediateProcessId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    407: 
+      name: "ignoredDataRecordTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: ""
+    408: 
+      name: "dataLinkFrameType"
+      data_type: "unsigned16"
+      data_semantic: "flags"
+      units: ""
+    409: 
+      name: "sectionOffset"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: ""
+    410: 
+      name: "sectionExportedOctets"
+      data_type: "unsigned16"
+      data_semantic: "quantity"
+      units: ""
+    411: 
+      name: "dot1qServiceInstanceTag"
+      data_type: "octetArray"
+      data_semantic: "default"
+      units: ""
+    412: 
+      name: "dot1qServiceInstanceId"
+      data_type: "unsigned32"
+      data_semantic: "identifier"
+      units: ""
+    413: 
+      name: "dot1qServiceInstancePriority"
+      data_type: "unsigned8"
+      data_semantic: "identifier"
+      units: ""
+    414: 
+      name: "dot1qCustomerSourceMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    415: 
+      name: "dot1qCustomerDestinationMacAddress"
+      data_type: "macAddress"
+      data_semantic: "default"
+      units: ""
+    417: 
+      name: "postLayer2OctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    418: 
+      name: "postMCastLayer2OctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    420: 
+      name: "postLayer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    421: 
+      name: "postMCastLayer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    422: 
+      name: "minimumLayer2TotalLength"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    423: 
+      name: "maximumLayer2TotalLength"
+      data_type: "unsigned64"
+      data_semantic: ""
+      units: "octets"
+    424: 
+      name: "droppedLayer2OctetDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    425: 
+      name: "droppedLayer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    426: 
+      name: "ignoredLayer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    427: 
+      name: "notSentLayer2OctetTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    428: 
+      name: "layer2OctetDeltaSumOfSquares"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "octets"
+    429: 
+      name: "layer2OctetTotalSumOfSquares"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "octets"
+    430: 
+      name: "layer2FrameDeltaCount"
+      data_type: "unsigned64"
+      data_semantic: "deltaCounter"
+      units: "frames"
+    431: 
+      name: "layer2FrameTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "frames"
+    432: 
+      name: "pseudoWireDestinationIPv4Address"
+      data_type: "ipv4Address"
+      data_semantic: "default"
+      units: ""
+    433: 
+      name: "ignoredLayer2FrameTotalCount"
+      data_type: "unsigned64"
+      data_semantic: "totalCounter"
+      units: "frames"
+
