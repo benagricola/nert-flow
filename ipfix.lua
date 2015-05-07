@@ -4,6 +4,7 @@ local u16  = binutil.u16
 local u32  = binutil.u32
 local uvar = binutil.uvar
 local yaml = require("yaml")
+local json = require("json")
 
 local _M = { templates = {}, config = { tpl_cache_file = nil } }
 
@@ -40,15 +41,25 @@ end
 
 function _M.load_templates(cache_file)
     local f,err = io.open(cache_file, "r")
-    if not f then return end
-    templates = yaml.load(f:read("*all"))
+    if not f then
+        print(err)
+        return
+    end
+    templates = yaml.decode(f:read("*all"))
+    if not templates then
+        templates = {}
+    end
     _M.templates = templates
     f:close()
 end
 
 function _M.save_templates(cache_file)
     local f,err = io.open(cache_file, "w")
-    f:write(yaml.dump(_M.templates))
+    if not f then
+        print(err)
+        return
+    end
+    f:write(yaml.encode(_M.templates))
     f:close()
 end
 
@@ -155,21 +166,28 @@ function _M.parse_set(packet)
 
         set.fields = _M.parse_template_fields(set,set_data)
 
-        _M.templates[set.tpl_id] = set
-        _M.save_templates()
+        if not _M.templates then
+            print("No templates identified, skipping...")
+        else
+            _M.templates[set.tpl_id] = set
+        end
+
     elseif set.id == 3 then -- If this is an options template, ignore for the moment
 
     elseif set.id >= 4 and set.id <= 255 then
         -- Ignore, these are unassigned
     else
         -- Template ID is our set.id
-        local template = _M.templates[set.id]
-        if not template then
-            print("Identified flow set with template ID " .. set.id .. " we don't have cached yet...")
+        if not _M.templates then
+            print("No templates identified, skipping...")
         else
-            set.flows = _M.parse_flows(template,set_data)
+            local template = _M.templates[set.id]
+            if not template then
+                print("Identified flow set with template ID " .. set.id .. " we don't have cached yet...")
+            else
+                set.flows = _M.parse_flows(template,set_data)
+            end
         end
-
     end
 
     return set, packet:sub(set.len+1)
