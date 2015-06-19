@@ -1,9 +1,13 @@
 local binutil = require("binutil")
+local lp      = require("logprint")
+local log     = require("log")
 local u8   = binutil.u8
 local u16  = binutil.u16
 local u32  = binutil.u32
 local uvar = binutil.uvar
-local yaml = require("yaml")
+local bit_bor = bit.bor
+local bit_lshift = bit.lshift
+
 local json = require("json")
 
 local _M = { templates = {}, config = { tpl_cache_file = nil } }
@@ -22,11 +26,18 @@ local type_map = {
     local bin_ip = 0 
     for i=1,#raw, 1 do
         local bin_octet = u8(raw,i)
-        bin_ip = bit.bor(bit.lshift(bin_octet, 8*(4-i) ), bin_ip)
+        bin_ip = bit_bor(bit_lshift(bin_octet, 8*(4-i) ), bin_ip)
     end
 
+    local o1 = u8(raw,1)
+    local o2 = u8(raw,2)
+    local o3 = u8(raw,3)
+    local o4 = u8(raw,4)
+    if o1 == nil or o2 == nil or o3 == nil or o4 == nil then
+        return nil
+    end
     return { 
-        string.format("%i.%i.%i.%i", u8(raw,1),u8(raw,2),u8(raw,3),u8(raw,4)),
+        string.format("%i.%i.%i.%i", o1,o2,o3,o4),
         bin_ip,
     } end,
 
@@ -45,7 +56,7 @@ function _M.load_templates(cache_file)
         print(err)
         return
     end
-    templates = yaml.decode(f:read("*all"))
+    templates = json.decode(f:read("*all"))
     if not templates then
         templates = {}
     end
@@ -59,7 +70,7 @@ function _M.save_templates(cache_file)
         print(err)
         return
     end
-    f:write(yaml.encode(_M.templates))
+    f:write(json.encode(_M.templates))
     f:close()
 end
 
@@ -132,7 +143,11 @@ function _M.parse_flows(template,data)
 
         -- For our template fields, 
         for i=1,#fields do
-            local field = fields[i]
+            local field = {} 
+
+            -- Lookup static values in metatable
+            setmetatable(field, { __index = fields[i] })
+
             local field_len = field.len
             local data_type = field.data_type
             local raw_value = data:sub(1,field_len)
@@ -149,15 +164,21 @@ function _M.parse_flows(template,data)
 end
 
 function _M.parse_set(packet)
+
+    local header = packet:sub(1,4)
+    local data   = packet:sub(5)
+
     local set = {
-        id    = u16(packet,1),
-        len   = u16(packet,3),
+        id    = u16(header,1),
+        len   = u16(header,3),
     }
 
-    local set_data = packet:sub(5,set.len)
+    local set_data = data:sub(1,set.len-4)
+    
+    packet = packet:sub(set.len+1)
 
     if set.id == 2 then -- If this is a template set then parse as such
-        set.tpl_id = u16(set_data,1)
+        set.tpl_id    = u16(set_data,1)
         set.no_fields = u16(set_data,3)
 
         local fields = {}
@@ -167,30 +188,50 @@ function _M.parse_set(packet)
         set.fields = _M.parse_template_fields(set,set_data)
 
         if not _M.templates then
-            print("No templates identified, skipping...")
+            lp.dequeue("No templates identified, skipping...",5)
         else
             _M.templates[set.tpl_id] = set
         end
 
     elseif set.id == 3 then -- If this is an options template, ignore for the moment
+        print("Options template")
+        set.tpl_id          = u16(set_data,1)
+        set.no_fields       = u16(set_data,3)
+        set.no_scope_fields = u16(set_data,5)
+
+        set_data = set_data:sub(7)
+
+        -- Parse fields
+        set.fields = _M.parse_template_fields(set,set_data)
+
+        -- Scope fields always come first, set them to 'scope'
+        for i=1,set.no_scope_fields do
+            set.fields[i].scope = true
+        end
+
+        if not _M.templates then
+            lp.dequeue("No templates identified, skipping...",5)
+        else
+            _M.templates[set.tpl_id] = set
+        end
 
     elseif set.id >= 4 and set.id <= 255 then
-        -- Ignore, these are unassigned
+        -- Ignore, these are not flow data sets
     else
         -- Template ID is our set.id
         if not _M.templates then
-            print("No templates identified, skipping...")
+            lp.dequeue("No templates identified, skipping...",5)
         else
             local template = _M.templates[set.id]
             if not template then
-                print("Identified flow set with template ID " .. set.id .. " we don't have cached yet...")
+                lp.dequeue("Identified flow set with template ID " .. set.id .. " we don't have cached yet...",5)
             else
                 set.flows = _M.parse_flows(template,set_data)
             end
         end
     end
 
-    return set, packet:sub(set.len+1)
+    return set, packet
 end
 
 return _M
