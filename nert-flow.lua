@@ -9,6 +9,7 @@ local lp          = require("logprint")
 
 local expirationd = require("expirationd")
 local bit_band    = bit.band
+local bit_rshift  = bit.rshift
 
 local http        = require("http.server")
 local fiber       = require("fiber")
@@ -22,6 +23,8 @@ local json_encode = json.encode
 
 local socket      = require("socket")
 
+ProFi = require 'ProFi'
+ProFi:setGetTimeMethod(fiber.time)
 
 function rPrint(s, l, i) -- recursive Print (structure, limit, indent)
     l = (l) or 500; i = i or "";        -- default item limit, indent string
@@ -74,11 +77,23 @@ local metrics = {
     fps = 3,
 }
 
+local flow_status = {
+    idle_timeout   = 1,
+    active_timeout = 2,
+    ended          = 3,
+    force_ended    = 4,
+    lor_ended      = 5,
+}
+
 -- Define reverse mappings
-local tcp_flags_reverse = {}
-local proto_reverse = {}
-local direction_reverse = {}
-local metrics_reverse = {}
+local tcp_flags_reverse   = {}
+local tcp_flags_iter      = {}
+local proto_reverse       = {}
+local proto_iter          = {}
+local direction_reverse   = {}
+local direction_iter      = {}
+local flow_status_reverse = {}
+local flow_status_iter    = {}
 
 
 local tcp_flags_name = function(tcp_flags_num)
@@ -93,8 +108,12 @@ local direction_name = function(direction_num)
     return direction_reverse[direction_num] or 'unknown'
 end
 
-local metrics_name = function(metrics_num) 
-    return metrics_reverse[metrics_num] or 'unknown'
+local direction_name = function(direction_num) 
+    return direction_reverse[direction_num] or 'unknown'
+end
+
+local flow_status_name = function(flow_status_num) 
+    return flow_status_reverse[flow_status_num] or 'unknown'
 end
 
 local load_config = function()
@@ -117,26 +136,34 @@ local load_config = function()
         elements.by_name[fields.name] = id
     end
 
-    config.fiber_channel_timeout   = config.fiber_channel_timeout or 1
-    config.fiber_channel_capacity  = config.fiber_channel_capacity or 1024
-    config.fiber_channel_full_perc = config.fiber_channel_full_perc or 0.85
-    config.ipfix_tpl_save_interval = config.ipfix_tpl_save_interval or 300
-    config.active_timeout          = config.active_timeout or 60
-    config.idle_timeout            = config.idle_timeout or 60
-    config.bucket_length           = config.bucket_length or 10
-    config.bucket_count            = config.bucket_count or 360
-    config.ports                   = config.ports or { 2055 }
-    config.max_history             = config.bucket_length * config.bucket_count
+    config.fiber_channel_timeout      = config.fiber_channel_timeout or 1
+    config.fiber_channel_capacity     = config.fiber_channel_capacity or 1024
+    config.fiber_channel_full_perc    = config.fiber_channel_full_perc or 0.85
+    config.ipfix_tpl_save_interval    = config.ipfix_tpl_save_interval or 300
+    config.active_timeout             = config.active_timeout or 60
+    config.idle_timeout               = config.idle_timeout or 60
+    config.bucket_length              = config.bucket_length or 10
+    config.bucket_count               = config.bucket_count or 360
+    config.ports                      = config.ports or { 2055 }
+    config.max_history                = config.bucket_length * config.bucket_count
+    config.average_calculation_period = config.average_calculation_period or (config.bucket_length * 3)
     
     local thresholds = config.thresholds
     for tcp_flags_name, tcp_flags_num in pairs(tcp_flags) do
         tcp_flags_reverse[tcp_flags_num] = tcp_flags_name
+        table.insert(tcp_flags_iter,{tcp_flags_name,tcp_flags_num})
     end
     for proto_name, proto_num in pairs(proto) do
         proto_reverse[proto_num] = proto_name
+        table.insert(proto_iter,{proto_name,proto_num})
     end
     for direction_name, direction_num in pairs(direction) do
         direction_reverse[direction_num] = direction_name
+        table.insert(direction_iter,{direction_name,direction_num})
+    end
+    for flow_status_name, flow_status_num in pairs(flow_status) do
+        flow_status_reverse[flow_status_num] = flow_status_name
+        table.insert(flow_status_iter,{flow_status_name,flow_status_num})
     end
 
     local interesting_ports = config.interesting_ports
@@ -188,19 +215,22 @@ local in_subnet = function(subnet)
     return nil
 end
 
-local bucket_member_invalid = function(args,tuple)
-    local now = math_ceil(fiber.time())
-    
-    local older = tuple[1] < (now - args.max_history)
-    if older then
-        log.info(tuple[1] .. ' < ' .. (now - args.max_history) .. ' (now is ' .. now .. ')')
-    end
-    return older
+local flow_expired = function(args,tuple)
+    -- Flows are stored with millisecond precision
+    return tuple[1] < ((fiber.time() * 1000) - args.max_history)
 end
 
-local bucket_member_delete = function(space_id,args,tuple)
-    log.info('Deleting row from space ' .. space_id .. ' with timestamp ' .. tuple[1])
-    box.space[space_id]:delete(tuple)
+-- Special case so we don't remove the average bucket at timestamp 0
+local bucket_expired = function(args,tuple)
+    return tuple[1] < (fiber.time() - args.max_history) and tuple[1] ~= 0
+end
+
+local member_flows_delete = function(space_id,args,tuple)
+    box.space[space_id]:delete({tuple[1],tuple[3],tuple[4],tuple[5],tuple[6],tuple[7],tuple[8]})
+end
+
+local member_bucket_delete = function(space_id,args,tuple)
+    box.space[space_id]:delete({tuple[1]})
 end
 
 local setup_db = function()
@@ -213,13 +243,17 @@ local setup_db = function()
     box.space.flows:create_index('by_src_ip',{unique = false, parts = {3, 'STR'}, if_not_exists = true})
     box.space.flows:create_index('by_dst_port',{unique = false, parts = {6, 'NUM'}, if_not_exists = true})
     box.space.flows:create_index('by_src_port',{unique = false, parts = {4, 'NUM'}, if_not_exists = true})
-    box.space.flows:truncate()
-    expirationd.run_task('expire_flows', box.space.flows.id, bucket_member_invalid, bucket_member_delete, {max_history = config.max_history}, 50, 3600)
+    expirationd.run_task('expire_flows', box.space.flows.id, flow_expired, member_flows_delete, {max_history = config.max_history}, 1000, 3600)
 
-    -- {Timestamp}, Data 
+    -- FLOWS: {Timestamp}, Data 
     box.schema.space.create('buckets',{field_count=2,if_not_exists = true})
     box.space.buckets:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM'}, if_not_exists = true})
-    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_member_invalid, bucket_member_delete, {max_history = config.max_history}, 50, 3600)
+    box.space.buckets:create_index('by_ts',{unique = true, parts = {1, 'NUM'}, if_not_exists = true})
+
+    -- Delete moving average bucket on start
+    box.space.buckets:delete({0})
+
+    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
 end
 
 
@@ -258,6 +292,27 @@ local flow2tuple = function(flow)
         flow.tos,
         flow.subnet,
         flow.ip,
+    }
+end
+
+local bucket2table = function(bucket)
+    if bucket == nil then
+        return nil
+    end
+    return {
+        ts   = bucket[1],
+        data = bucket[2],
+    }
+end
+
+local bucket2tuple = function(bucket)
+    if bucket == nil then
+        return nil
+    end
+
+    return {
+        bucket.ts,
+        bucket.data,
     }
 end
 
@@ -316,16 +371,6 @@ local ipfix_listener = function(port,channel)
     end
 end
 
-local listener_ports = {}
-
-local start_ipfix_listener = function(port,channel)
-    if not listener_ports[port] then
-        print("Starting listener on port " .. port)
-        fiber.create(ipfix_listener,port,channel)
-        listener_ports[port] = true
-    end
-end
-
 
 local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     -- Set fiber listener name
@@ -334,15 +379,145 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 
     
     local decode_icmp_type = function(type_raw)
-        return bit_band(256,type_raw)
+        local code = type_raw.value % 256
+        local typ = (type_raw.value - code) / 256
+
+        local name = 'unknown'
+        -- Echo Reply
+        if typ == 0 then
+            name = 'echo_reply'
+        -- Destination Unreachable
+        elseif typ == 3 then
+            if code == 0 then
+                name = 'net_unreachable'
+            elseif code == 1 then
+                name = 'host_unreachable'
+            elseif code == 2 then
+                name = 'protocol_unreachable'
+            elseif code == 3 then
+                name = 'port_unreachable'
+            elseif code == 4 then
+                name = 'frag_needed_df_set'
+            elseif code == 5 then
+                name = 'src_route_failed'
+            elseif code == 6 then
+                name = 'dst_net_unknown'
+            elseif code == 7 then
+                name = 'dst_host_unknown'
+            elseif code == 8 then
+                name = 'src_host_isolated'
+            elseif code == 9 then
+                name = 'dst_net_admin_prohibited'
+            elseif code == 10 then
+                name = 'dst_host_admin_prohibited'
+            elseif code == 11 then
+                name = 'dst_net_unreachable_tos'
+            elseif code == 12 then
+                name = 'dst_host_unreachable_tos'
+            elseif code == 13 then
+                name = 'admin_prohibited'
+            elseif code == 14 then
+                name = 'host_precedence_violation'
+            elseif code == 15 then
+                name = 'precedence_cutoff_in_effect'
+            end
+        -- Source Quench
+        elseif typ == 4 then
+            name = 'src_quench'
+        -- Redirect
+        elseif typ == 5 then
+            if code == 0 then
+                name = 'redirect_net'
+            elseif code == 1 then
+                name = 'redirect_host'
+            elseif code == 2 then
+                name = 'redirect_tos_net'
+            elseif code == 3 then
+                name = 'redirect_tos_host'
+            end
+        -- Alternate Host Address
+        elseif typ == 6 then
+            name = 'alt_addr_host'
+        -- Echo
+        elseif typ == 8 then
+            name = 'echo'
+        -- Router Advertisement
+        elseif typ == 9 then
+            name = 'router_advertisement'
+        -- Router Selection
+        elseif typ == 10 then
+            name = 'router_selection'
+        -- Time Exceeded
+        elseif typ == 11 then
+            if code == 0 then
+                name = 'ttl_exceeded'
+            elseif code == 1 then
+                name = 'frag_reassembly_ttl_exceeded'
+            end
+        -- Parameter Problem
+        elseif typ == 12 then
+            if code == 0 then
+                name = 'ptr_indicates_err'
+            elseif code == 1 then
+                name = 'missing_reqd_option'
+            elseif code == 2 then
+                name = 'bad_length'
+            end
+        -- Timestamp
+        elseif typ == 13 then
+            name = 'timestamp'
+        -- Timestamp Reply
+        elseif typ == 14 then
+            name = 'timestamp_reply'
+        -- Information Request 
+        elseif typ == 15 then
+            name = 'info_request'
+        -- Information Reply 
+        elseif typ == 16 then
+            name = 'info_reply'
+        -- Address Mask Request 
+        elseif typ == 17 then
+            name = 'addr_mask_request'
+        -- Address Mask Reply 
+        elseif typ == 18 then
+            name = 'addr_mask_reply'
+        -- Traceroute
+        elseif typ == 30 then
+            name = 'traceroute'
+        -- Datagram Conversion Error
+        elseif typ == 31 then
+            name = 'dgram_conversion_err'
+        -- Mobile Host Redirect
+        elseif typ == 32 then
+            name = 'mobile_host_redirect'
+        -- IPv6 Where Are you
+        elseif typ == 33 then
+            name = 'ipv6_where_are_you'
+        -- IPv6 I Am Here
+        elseif typ == 34 then
+            name = 'ipv6_i_am_here'
+        -- Mobile Registration Request
+        elseif typ == 35 then
+            name = 'mobile_reg_request'
+        -- Mobile Registration Reply
+        elseif typ == 36 then
+            name = 'mobile_reg_reply'
+        -- SKIP
+        elseif typ == 39 then
+            name = 'skip'
+        -- Photuris
+        elseif typ == 40 then
+            name = 'photuris'
+        end
+        return {name,typ,code}
     end
 
     local decode_tcp_flags = function(flags_raw)
         local flags = {} 
 
-        for value, name in ipairs(tcp_flags) do
-            if bit_band(value,flags_raw == value) then
-                flags[value] = true
+        for _,flag in ipairs(tcp_flags_iter) do
+            if bit_band(flag[2],flags_raw) == flag[2] then
+                table.insert(flags,{flag[1],flag[2]})
             end
         end
 
@@ -369,6 +544,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     local protocolIdentifier       = ebn.protocolIdentifier
     local ipClassOfService         = ebn.ipClassOfService
     local tcpControlBits           = ebn.tcpControlBits
+    local icmpTypeCodeIPv4         = ebn.icmpTypeCodeIPv4
     local sourceTransportPort      = ebn.sourceTransportPort
     local sourceIPv4Address        = ebn.sourceIPv4Address
     local destinationTransportPort = ebn.destinationTransportPort
@@ -384,7 +560,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     local bucket = {}
     local last_bucket_time = 0
 
-    local aggregate_stat = function(store,typ,stat,values)
+    local aggregate_stat = function(store,typ,stat,duration,values)
         if not store[typ] then
             store[typ] = {}
         end
@@ -392,25 +568,16 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
             store[typ][stat] = {}
         end
 
-
-        -- double exp_power = -speed_calc_period / average_calculation_amount_for_subnets;
-        -- double exp_value = exp(exp_power);
-        -- 
-        -- map_element* current_average_speed_element = &PerSubnetAverageSpeedMap[current_subnet];
-        -- 
-        -- current_average_speed_element->in_bytes = uint64_t(new_speed_element.in_bytes +
-        --     exp_value * ((double)current_average_speed_element->in_bytes - (double)new_speed_element.in_bytes));
-
-
-        local exp_power = -
         for key, value in ipairs(values) do
             if store[typ][stat][key] == nil then
-                store[typ][stat][key] = value
+                store[typ][stat][key] = (value / duration)
             else
-                store[typ][stat][key] = store[typ][stat][key] + value
+                store[typ][stat][key] = store[typ][stat][key] + (value / duration)
             end
         end
     end
+
+    local packets, bits, flows = 0,0,0
 
     while 1 == 1 do
         local now = fiber.time()
@@ -418,11 +585,14 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 
         -- Reset bucket if we're switching to a new one
         if bucket_time ~= last_bucket_time then
-            aggregate_channel:put({last_bucket_time,bucket})
+            if not aggregate_channel:put({last_bucket_time,bucket},config.fiber_channel_timeout) then
+                lp.dequeue('Error submitting bucket data to fiber channel, data lost!')
+            end
             -- Reset bucket for directions
             bucket = { {}, {}, {} }
-            log.info('Bucket reset, bucket time is now ' .. bucket_time)
+            log.info('Bucket reset with ' .. packets .. ' packets, ' .. bits / 8 .. ' bytes and ' .. flows .. ' flows at ' .. bucket_time)
             last_bucket_time = bucket_time
+            packets, bits, flows = 0,0,0
         end
 
         local res = ipfix_channel:get()
@@ -464,25 +634,24 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 local dst_port     = fields[destinationTransportPort].value
                 local protocol     = fields[protocolIdentifier].value
                 local tos          = fields[ipClassOfService].value
-                local flow_status  = fields[flowEndReason].value
+                local status       = fields[flowEndReason].value
 
-                local subnet, flow_dir, ip,tcp_flags
+                local subnet, flow_dir, ip, flags, icmp_typecode
 
-                if src_as == 0 then
+                if src_subnet ~= nil then
                     flow_dir = direction.outbound
                     subnet = src_subnet
                     ip = src_ip
-                elseif dst_as == 0 then
+                elseif dst_subnet ~= nil then
                     flow_dir = direction.inbound
                     subnet = dst_subnet
                     ip = dst_ip
                 else
-                    -- Fall back to identifying by Subnet
-                    if src_subnet ~= nil then
+                    if src_as == 0 then
                         flow_dir = direction.outbound
                         subnet = src_subnet
                         ip = src_ip
-                    elseif dst_subnet ~= nil then
+                    elseif dst_as == 0 then
                         flow_dir = direction.inbound
                         subnet = dst_subnet
                         ip = dst_ip
@@ -491,87 +660,145 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                     end
                 end
 
-                -- Store flow for use if flow triggers alert
-                -- {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
-                spc_flows:replace({
+                -- If this is a TCP flow, identify flags
+                if protocol == proto.TCP then
+                    flags = decode_tcp_flags(fields[tcpControlBits].value)
+                end
+
+                -- If this is an ICMP flow, identify type and code
+                if protocol == proto.ICMP then
+                    icmp_typecode = decode_icmp_type(fields[icmpTypeCodeIPv4])
+                end
+
+                local existing_flow = flow2table(spc_flows:get({
                     flow_start,
-                    flow_end,
                     src_ip,
                     src_port,
                     dst_ip,
                     dst_port,
                     protocol,
                     tos,
-                    subnet or '',
-                    ip or '',
-                })
+                }))
 
-                -- If this is a TCP flow, identify flags
-                if protocol == proto.TCP then
-                    tcp_flags = decode_tcp_flags(fields[tcpControlBits].value)
+
+                if existing_flow ~= nil then
+                    flow_duration = (flow_end - existing_flow.end_ts) / 1000
+                else
+                    -- Flow duration in seconds
+                    flow_duration = (flow_end - flow_start) / 1000
                 end
 
-                -- Flow duration in seconds
-                flow_duration = (flow_end - flow_start) / 1000
 
                 -- If flow is active and longer than active_timeout, this is active_timeout worth of observations
-                if (flow_status == flow_active and flow_duration > active_timeout) then
+                if (status == flow_status.active_timeout and flow_duration > active_timeout) then
                     flow_duration = active_timeout 
 
                 -- Otherwise if flow is inactive and longer than idle_timeout, this is idle_timeout worth of observations
-                elseif (flow_status ~= flow_active and flow_duration > idle_timeout) then
+                elseif (status ~= flow_status.active_timeout and flow_duration > idle_timeout) then
                     flow_duration = idle_timeout 
                 end
 
                 -- Make sure flow duration is never zero
-                if flow_duration == 0 then
-                    flow_duration = 0.001 -- Shortest possible flow duration is 1ms
+                if flow_duration < 1 then
+                    flow_duration = 1 -- Shortest possible flow duration is 1s
                 end
 
-                -- Our bucket is x seconds long
-                -- Our flow can be longer or shorter than that
-                
-                -- Calculate observed average speeds
-                observed_pps = deltaPackets / flow_duration
-                observed_bps = deltaBytes / flow_duration
-                observed_fps = 1 / flow_duration
 
-                log.info(
+                observed_pps = deltaPackets
+                observed_bps = deltaBytes * 8
+                observed_fps = 1
+
+                packets = packets + observed_pps
+                bits    = bits + observed_bps
+                flows   = flows + observed_fps
+
+                -- log.info(table.concat({
+                --     flow_start,
+                --     flow_end,
+                --     proto_name(protocol),
+                --     flow_status_name(status), 
+                --     src_ip .. ':' .. src_port .. ' -> ' .. dst_ip .. ':' .. dst_port,
+                --     direction_name(flow_dir),
+                --     deltaPackets,
+                --     'packets',
+                --     deltaBytes,
+                --     'bytes',
+                --     flow_duration,
+                --     'seconds',
+                --     observed_pps,
+                --     'pps',
+                --     observed_bps,
+                --     'bps'
+                -- },' '))
+
                 -- We cheat and just put flows into 'now' slot
                 local now = fiber.time()
 
                 local bucket_dir = bucket[flow_dir]
 
                 -- Global PPS / BPS / FPS
-                aggregate_stat(bucket_dir,'global','',{observed_bps,observed_pps,observed_fps})
+                aggregate_stat(bucket_dir,'global','',bucket_length,{observed_bps,observed_pps,observed_fps})
 
                 -- Protocol PPS / BPS / FPS
                 local proto_name = proto_name(protocol)
-                aggregate_stat(bucket_dir,'protocol',proto_name,{observed_bps,observed_pps,observed_fps})
+                aggregate_stat(bucket_dir,'protocol',proto_name,bucket_length,{observed_bps,observed_pps,observed_fps})
 
                 -- Subnet PPS / BPS / FPS
                 if subnet then
-                    aggregate_stat(bucket_dir,'subnet',subnet,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'subnet',subnet,bucket_length,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- IP PPS / BPS / FPS
                 if ip then
-                    aggregate_stat(bucket_dir,'ip',ip,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'ip',ip,bucket_length,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- Port PPS / BPS / FPS
                 if config.int_ports[src_port] then
-                    aggregate_stat(bucket_dir,'port',src_port,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'port',src_port,bucket_length,{observed_bps,observed_pps,observed_fps})
                 elseif config.int_ports[dst_port] then
-                    aggregate_stat(bucket_dir,'port',dst_port,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'port',dst_port,bucket_length,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- TCP Flags PPS / BPS / FPS
                 if protocol == proto.TCP then
-                    for num,flag in ipairs(tcp_flags_reverse) do
-                        aggregate_stat(bucket_dir,'tcp_flag',flag,{observed_bps,observed_pps,observed_fps})
+                    for _, flag in ipairs(flags) do
+                        aggregate_stat(bucket_dir,'tcp_flag',flag[1],bucket_length,{observed_bps,observed_pps,observed_fps})
                     end
                 end
+                -- ICMP Type/Code PPS / BPS / FPS
+                if protocol == proto.ICMP then
+                    aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],bucket_length,{observed_bps,observed_pps,observed_fps})
+                end
+
+                -- Store flow for use if an alert is triggered
+                -- {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
+
+                if status == flow_status.active_timeout then
+                    spc_flows:replace({
+                        flow_start,
+                        flow_end,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        protocol,
+                        tos,
+                        subnet or '',
+                        ip or '',
+                    })
+                else
+                    spc_flows:delete({
+                        flow_start,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        protocol,
+                        tos,
+                    })
+                end         
+
             end
         else
             fiber.sleep(0.1)
@@ -580,19 +807,39 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 end
 
 local bucket_monitor = function(aggregate_channel,graphite_channel)
+    local self = fiber.self()
+    self:name("ipfix/bucket-monitor")
+
     local bucket_length  = config.bucket_length
     local active_timeout = config.active_timeout
     local idle_timeout   = config.idle_timeout
 
+    local average_calculation_period = config.average_calculation_period
+
+    log.info('Calculating moving averages over a ' .. average_calculation_period .. 's period')
+
     local spc_buckets = box.space.buckets
+
     while 1 == 1 do
         local bucket_data = aggregate_channel:get() 
         local bucket_ts,bucket_stats = bucket_data[1], bucket_data[2]
 
         local graphite_output = {}
         
-        if bucket_stats ~= nil then
-            --spc_buckets:update({bucket_ts,bucket_stats})
+        if bucket_ts ~= nil and bucket_ts ~= 0 then
+            -- Put bucket into space for historical monitoring
+            spc_buckets:replace({bucket_ts,bucket_stats})
+
+            -- Get moving average bucket, stored at timestamp zero
+            local avg_bucket = bucket2table(spc_buckets:get{0})
+
+            -- If we don't have a set average bucket, then use the current bucket as our start point at position 0
+            if avg_bucket == nil then
+                log.info('No average bucket found, using current bucket as start point')
+                spc_buckets:insert{0,bucket_stats}
+            end
+
+
             -- For each direction
             for direction, stat_types in ipairs(bucket_stats) do
                 -- For each type
@@ -600,6 +847,7 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
                     for stat, values in pairs(stats) do
                         local sanitized_stat_name = tostring(stat):lower():gsub('/','_'):gsub('%.','_')
 
+                        -- Submit statistic to graphite
                         local graphite_name = table.concat({
                             'flow',
                             stat_type:lower(),
@@ -607,12 +855,45 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
                             direction_name(direction),
                         },'.'):gsub('%.%.','.')
 
-                        
-                        graphite_channel:put({graphite_name .. '.bps',values[1],bucket_ts})
-                        graphite_channel:put({graphite_name .. '.pps',values[2],bucket_ts})
-                        graphite_channel:put({graphite_name .. '.fps',values[3],bucket_ts})
+                        -- We don't need ridiculous decimal precision here and the numbers are large
+                        -- So lets just ceil the values instead of doing some ridiculous accurate rounding
+                        graphite_channel:put({graphite_name .. '.bps',math_ceil(values[1]),bucket_ts})
+                        graphite_channel:put({graphite_name .. '.pps',math_ceil(values[2]),bucket_ts})
+                        graphite_channel:put({graphite_name .. '.fps',math_ceil(values[3]),bucket_ts})
+
+                        if avg_bucket ~= nil then
+                            if avg_bucket.data[direction] == nil then
+                                avg_bucket.data[direction] = {}
+                            end
+
+                            if avg_bucket.data[direction][stat_type] == nil then
+                                avg_bucket.data[direction][stat_type] = {}
+                            end
+
+                            -- If stat isn't set then set it to start values
+                            if avg_bucket.data[direction][stat_type][stat] == nil then
+                                avg_bucket.data[direction][stat_type][stat] = avg_values
+                            else
+                                -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
+                                local avg_values = avg_bucket.data[direction][stat_type][stat]
+                                local exp_value = math.exp(-bucket_length/average_calculation_period)
+
+                                avg_values[1] = values[1] + exp_value * (avg_values[1] - values[1])
+                                avg_values[2] = values[2] + exp_value * (avg_values[2] - values[2])
+                                avg_values[3] = values[3] + exp_value * (avg_values[3] - values[3])
+
+                                graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
+                                graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
+                                graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
+                            end
+                        end
                     end
                 end
+            end
+
+            -- Put average bucket back into db
+            if avg_bucket ~= nil then
+                spc_buckets:replace(bucket2tuple(avg_bucket))
             end
         end
 
@@ -621,15 +902,20 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
 end
 
 local graphite_submitter = function(graphite_channel)
+    local self = fiber.self()
+    self:name("ipfix/graphite-submitter")
+
     local pending = 0
     local output = ''
     local conn_info = socket.getaddrinfo(config.graphite_host,'2010')
     local graphite_host = conn_info[1].host
-    local graphite_port = conn_info[1].port
+    local graphite_port = config.graphite_port
 
     if not graphite_host or not graphite_port then
         log.info('Disabling graphite submission, no host or port configured!')
         return
+    else
+        log.info('Resolved graphite host to ' .. graphite_host .. ':' .. graphite_port)
     end
 
     local graphite = socket('AF_INET', 'SOCK_DGRAM', 'udp')
@@ -642,7 +928,6 @@ local graphite_submitter = function(graphite_channel)
         end
 
         if pending >= 5 or to_submit == nil then
-            log.info(output)
             local sent = graphite:sendto(graphite_host,graphite_port,output)
             if not sent then
                 log.error('Metric output to Graphite at ' .. graphite_host .. ':' .. graphite_port .. ' failed! - ' .. graphite:error())
@@ -655,13 +940,23 @@ local graphite_submitter = function(graphite_channel)
     graphite:close()
 end
 
+local listener_ports = {}
+
+local start_ipfix_listener = function(port,channel)
+    if not listener_ports[port] then
+        log.info("Starting listener on port " .. port)
+        fiber.create(ipfix_listener,port,channel)
+        listener_ports[port] = true
+    end
+end
+
 local ipfix_background_saver = function()
     local self = fiber.self()
     self:name("ipfix/background-saver")
     while 1 == 1 do
         -- Sleep for save_interval seconds between each save
         fiber.sleep(config.ipfix_tpl_save_interval)
-        print("Saving IPFIX templates...")
+        log.info("Saving IPFIX templates...")
         ipfix.save_templates(config.ipfix_tpl_cache_file)
     end
 end
@@ -692,7 +987,7 @@ end
 local start_http_server = function()
     local bucket_length = config.bucket_length
 
-    print("Start HTTP Server on " .. config.http_host .. ":" .. config.http_port )
+    log.info("Start HTTP Server on " .. config.http_host .. ":" .. config.http_port )
     server = http.new(config.http_host, config.http_port, {app_dir = '..', cache_static = false})
 
     server:route({ path = '/' }, function(self)
@@ -723,84 +1018,34 @@ local start_http_server = function()
         return self:render{ json = response }
     end)
     
-    server:route({ path = '/buckets/:stat', method='GET' }, function(self)
+    server:route({ path = '/buckets', method='GET' }, function(self)
         local stat = self:stash('stat')
-
-        return self:render{ json = { buckets = buckets } }
-    end)
-
-    server:route({ path = '/flows/', method='GET' }, function(self)
-        local now = fiber.time()
-        local bucket_ts = math_ceil(now - now % bucket_length) - 60
-        local out = { {}, {}, {} }
-        for dir, times in ipairs(buckets) do
-            local bucket = times[bucket_ts]
-
-            if bucket then
-                for name, items in pairs(bucket_indexes) do
-                    if out[dir][name] == nil then
-                        out[dir][name] = {}
-                    end
-
-                    if type(items) == 'table' then
-                        for item, id in pairs(items) do
-                            out[dir][name][item] = bucket[id]
-                        end
-                    else
-                        out[dir][name] = bucket[items]
-                    end
-                        
-                end
-            end
+        local out = {}
+        local newer = math_ceil(fiber.time() - 3600)
+        local i = 1
+        for _, bucket in box.space.buckets.index.by_ts:pairs({newer},{iterator = 'GT'}) do
+            table.insert(out,bucket[1],bucket[2])
         end
-
-        return self:render{ json = { bucket = bucket_ts, results = out } }
+        return self:render{ json = { buckets = out } }
     end)
 
-    -- SOURCES: {Listen IP, Listen Port}, Name, Group, Options, Active
-    server:route({ path = '/sources/', method='GET' }, function(self)
-        local results = {}
-        for _, source in box.space.sources:pairs{} do
-            table.insert(results,source2table(source))
-        end
-        
-        return self:render{ json = results }
+    server:route({ path = '/avg-bucket', method='GET' }, function(self)
+        return self:render{ json = { buckets = box.space.buckets:get({0})[2] } }
     end)
 
-    server:route({ path = '/sources/', method='ANY' }, function(self)
-        local args = self:json()
-
-        if self.method == 'DELETE' then
-            local result,err = box.space.sources.index.primary:delete({args.source_ip,args.listen_port})
-            local response = self:render{ json = {} }
-            if err ~= nil then
-                response.status = 404
-                response = err
-            else 
-                response.status = 204
-            end
-        elseif self.method == 'PUT' then
-
-            if args.active == nil then
-                args.active = true
-            end
-
-            local result,err = box.space.sources:replace(source2tuple(args))
-            local response = self:render{ json = result or {} }
-            if err ~= nil then
-                response.status = 400
-                response = err
-            else 
-                start_ipfix_listener(args.listen_port)
-                response.headers['Location'] = '/source/' .. args.name
-                response.status = 201
-            end
+    server:route({ path = '/profile', method='GET' }, function(self)
+        local msg
+        if not ProFi.has_started or ProFi.has_finished then
+            ProFi:start()
+            msg = 'Started profiling...'
         else
-            local response = self:render{ status = 400 }
+            ProFi:stop()
+            ProFi:writeReport()
+            msg = 'Stopped profiling and wrote report to file!'
         end
-        return response
+        return self:render{ json = { msg = msg } }
     end)
-    
+
     server:start()
 end
 

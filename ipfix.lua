@@ -45,6 +45,19 @@ local type_map = {
 }
 
 
+
+function rPrint(s, l, i) -- recursive Print (structure, limit, indent)
+    l = (l) or 500; i = i or "";        -- default item limit, indent string
+    if (l<1) then print "ERROR: Item limit reached."; return l-1 end;
+    local ts = type(s);
+    if (ts ~= "table") then print (i,ts,s); return l-1 end
+    print (i,ts);           -- print "table"
+    for k,v in pairs(s) do  -- print "[KEY] VALUE"
+        l = rPrint(v, l, i.."\t["..tostring(k).."]");
+        if (l < 0) then break end
+    end
+    return l
+end
 function _M.configure(config,elements)
     _M.config = config
     _M.elements = elements
@@ -57,9 +70,10 @@ function _M.load_templates(cache_file)
         return
     end
     templates = json.decode(f:read("*all"))
-    if not templates then
+    if templates == nil then
         templates = {}
     end
+    log.info('Loaded templates from file...')
     _M.templates = templates
     f:close()
 end
@@ -194,7 +208,6 @@ function _M.parse_set(packet)
         end
 
     elseif set.id == 3 then -- If this is an options template, ignore for the moment
-        print("Options template")
         set.tpl_id          = u16(set_data,1)
         set.no_fields       = u16(set_data,3)
         set.no_scope_fields = u16(set_data,5)
@@ -222,7 +235,7 @@ function _M.parse_set(packet)
         if not _M.templates then
             lp.dequeue("No templates identified, skipping...",5)
         else
-            local template = _M.templates[set.id]
+            local template = _M.templates[tostring(set.id)]
             if not template then
                 lp.dequeue("Identified flow set with template ID " .. set.id .. " we don't have cached yet...",5)
             else
