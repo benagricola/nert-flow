@@ -85,6 +85,63 @@ local flow_status = {
     lor_ended      = 5,
 }
 
+local icmp_types = {
+    [0]  = 'echo_reply',
+    [3]  = {
+            'net_unreachable',
+            'host_unreachable',
+            'protocol_unreachable',
+            'port_unreachable',
+            'frag_needed_df_set',
+            'src_route_failed',
+            'dst_net_unknown',
+            'dst_host_unknown',
+            'src_host_isolated',
+            'dst_net_admin_prohibited',
+            'dst_host_admin_prohibited',
+            'dst_net_unreachable_tos',
+            'dst_host_unreachable_tos',
+            'admin_prohibited',
+            'host_precedence_violation',
+            'precedence_cutoff_in_effect',
+    },
+    [4]  = 'src_quench',
+    [5]  = {
+            'redirect_net',
+            'redirect_host',
+            'redirect_tos_net',
+            'redirect_tos_host',
+    },
+    [6]  = 'alt_addr_host',
+    [8]  = 'echo',
+    [9]  = 'router_advertisement',
+    [10] = 'router_selection',
+    [11] = {
+            'ttl_exceeded',
+            'frag_reassembly_ttl_exceeded',
+    },
+    [12] = { 
+            'ptr_indicates_err',
+            'missing_reqd_option',
+            'bad_length',
+    },
+    [13] = 'timestamp',
+    [14] = 'timestamp_reply',
+    [15] = 'info_request',
+    [16] = 'info_reply',
+    [17] = 'addr_mask_request',
+    [18] = 'addr_mask_reply',
+    [30] = 'traceroute',
+    [31] = 'dgram_conversion_err',
+    [32] = 'mobile_host_redirect',
+    [33] = 'ipv6_where_are_you',
+    [34] = 'ipv6_i_am_here',
+    [35] = 'mobile_reg_request',
+    [36] = 'mobile_reg_reply',
+    [39] = 'skip',
+    [40] = 'photuris'
+}
+
 -- Define reverse mappings
 local tcp_flags_reverse   = {}
 local tcp_flags_iter      = {}
@@ -383,132 +440,17 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
         local typ = (type_raw.value - code) / 256
 
         local name = 'unknown'
-        -- Echo Reply
-        if typ == 0 then
-            name = 'echo_reply'
-        -- Destination Unreachable
-        elseif typ == 3 then
-            if code == 0 then
-                name = 'net_unreachable'
-            elseif code == 1 then
-                name = 'host_unreachable'
-            elseif code == 2 then
-                name = 'protocol_unreachable'
-            elseif code == 3 then
-                name = 'port_unreachable'
-            elseif code == 4 then
-                name = 'frag_needed_df_set'
-            elseif code == 5 then
-                name = 'src_route_failed'
-            elseif code == 6 then
-                name = 'dst_net_unknown'
-            elseif code == 7 then
-                name = 'dst_host_unknown'
-            elseif code == 8 then
-                name = 'src_host_isolated'
-            elseif code == 9 then
-                name = 'dst_net_admin_prohibited'
-            elseif code == 10 then
-                name = 'dst_host_admin_prohibited'
-            elseif code == 11 then
-                name = 'dst_net_unreachable_tos'
-            elseif code == 12 then
-                name = 'dst_host_unreachable_tos'
-            elseif code == 13 then
-                name = 'admin_prohibited'
-            elseif code == 14 then
-                name = 'host_precedence_violation'
-            elseif code == 15 then
-                name = 'precedence_cutoff_in_effect'
+        local match_type = icmp_types[typ]
+
+        if type(match_type) == 'table' then
+            -- Lua uses 1-indexed tables so add 1 (since codes start at 0)
+            if match_type[code+1] ~= nil then
+                name = match_type[code+1]
             end
-        -- Source Quench
-        elseif typ == 4 then
-            name = 'src_quench'
-        -- Redirect
-        elseif typ == 5 then
-            if code == 0 then
-                name = 'redirect_net'
-            elseif code == 1 then
-                name = 'redirect_host'
-            elseif code == 2 then
-                name = 'redirect_tos_net'
-            elseif code == 3 then
-                name = 'redirect_tos_host'
-            end
-        -- Alternate Host Address
-        elseif typ == 6 then
-            name = 'alt_addr_host'
-        -- Echo
-        elseif typ == 8 then
-            name = 'echo'
-        -- Router Advertisement
-        elseif typ == 9 then
-            name = 'router_advertisement'
-        -- Router Selection
-        elseif typ == 10 then
-            name = 'router_selection'
-        -- Time Exceeded
-        elseif typ == 11 then
-            if code == 0 then
-                name = 'ttl_exceeded'
-            elseif code == 1 then
-                name = 'frag_reassembly_ttl_exceeded'
-            end
-        -- Parameter Problem
-        elseif typ == 12 then
-            if code == 0 then
-                name = 'ptr_indicates_err'
-            elseif code == 1 then
-                name = 'missing_reqd_option'
-            elseif code == 2 then
-                name = 'bad_length'
-            end
-        -- Timestamp
-        elseif typ == 13 then
-            name = 'timestamp'
-        -- Timestamp Reply
-        elseif typ == 14 then
-            name = 'timestamp_reply'
-        -- Information Request 
-        elseif typ == 15 then
-            name = 'info_request'
-        -- Information Reply 
-        elseif typ == 16 then
-            name = 'info_reply'
-        -- Address Mask Request 
-        elseif typ == 17 then
-            name = 'addr_mask_request'
-        -- Address Mask Reply 
-        elseif typ == 18 then
-            name = 'addr_mask_reply'
-        -- Traceroute
-        elseif typ == 30 then
-            name = 'traceroute'
-        -- Datagram Conversion Error
-        elseif typ == 31 then
-            name = 'dgram_conversion_err'
-        -- Mobile Host Redirect
-        elseif typ == 32 then
-            name = 'mobile_host_redirect'
-        -- IPv6 Where Are you
-        elseif typ == 33 then
-            name = 'ipv6_where_are_you'
-        -- IPv6 I Am Here
-        elseif typ == 34 then
-            name = 'ipv6_i_am_here'
-        -- Mobile Registration Request
-        elseif typ == 35 then
-            name = 'mobile_reg_request'
-        -- Mobile Registration Reply
-        elseif typ == 36 then
-            name = 'mobile_reg_reply'
-        -- SKIP
-        elseif typ == 39 then
-            name = 'skip'
-        -- Photuris
-        elseif typ == 40 then
-            name = 'photuris'
+        else
+            name = match_type
         end
+
         return {name,typ,code}
     end
 
