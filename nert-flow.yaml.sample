@@ -1,0 +1,82 @@
+---
+  work_dir: ./data/
+  http_host: "127.0.0.1"
+  http_port: 8080
+
+  ipfix_tpl_cache_file: ipfix_tpl_cache.json
+  ipfix_tpl_save_interval: 60
+  fiber_channel_capacity: 16384
+
+  subnets:
+    - '1.1.12.0/24'
+    - '1.1.13.0/24'
+    - '1.1.14.0/24'
+    - '1.1.15.0/24'
+    - '10.10.1.0/24'
+  interesting_ports:
+    - 80
+    - 443
+    - 53
+    - 123
+    - 1900
+  # 360, 10 second buckets - 3600 seconds of data.
+  bucket_length: 10 
+  average_calculation_period: 30
+  bucket_count: 360
+  ports:
+    - 2055
+  thresholds:
+    inbound:
+      subnet:
+        '1.1.12.0/24':
+          bps: 
+            abs: 524288000 # 500Mbps
+            pct: 10000
+          pps: 
+            abs: 50000
+            pct: 10000
+          fps:
+            abs: 5000
+            pct: 10000
+        '1.1.13.0/24':
+          bps: 
+            abs: 524288000 # 500Mbps
+            pct: 10000
+          pps: 
+            abs: 50000
+            pct: 10000
+          fps:
+            abs: 5000
+            pct: 10000
+        '1.1.14.0/24':
+          bps: 
+            abs: 5242880 # 500Mbps
+            pct: 10000
+          pps: 
+            abs: 50000
+            pct: 10000
+          fps:
+            abs: 5000
+            pct: 10000
+        '1.1.15.0/24':
+          bps: 
+            abs: 524288000 # 500Mbps
+            pct: 10000
+          pps: 
+            abs: 50000
+            pct: 10000
+          fps:
+            abs: 5000
+            pct: 10000
+      icmp_typecode:
+        echo:
+          bps:
+            abs: 1000000
+            pct: 10000
+          pps:
+            abs: 2000
+            pct: 10000
+      
+  graphite_host: graphite
+  graphite_port: 2010
+
