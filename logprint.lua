@@ -1,14 +1,15 @@
-local os = require("os")
+local log = require("log")
+local fiber = require("fiber")
 local _M = { messages = {} }
 
 function _M.dequeue(message,interval)
     if not _M.messages[message] then
-        _M.messages[message] = os.time()
-        print(message)
+        _M.messages[message] = fiber.time()
+        log.info(message)
     else
-        if os.time() > _M.messages[message] + interval then
+        if fiber.time() > _M.messages[message] + interval then
             _M.messages[message] = nil
-            print(message)
+            log.info(message)
         end
     end
 end

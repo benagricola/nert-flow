@@ -71,7 +71,7 @@ local direction = {
     unknown  = 3,
 }
 
-local metrics = {
+local metric = {
     bps = 1,
     pps = 2,
     fps = 3,
@@ -151,6 +151,7 @@ local direction_reverse   = {}
 local direction_iter      = {}
 local flow_status_reverse = {}
 local flow_status_iter    = {}
+local metric_reverse     = {}
 
 
 local tcp_flags_name = function(tcp_flags_num)
@@ -204,6 +205,7 @@ local load_config = function()
     config.ports                      = config.ports or { 2055 }
     config.max_history                = config.bucket_length * config.bucket_count
     config.average_calculation_period = config.average_calculation_period or (config.bucket_length * 3)
+    config.thresholds                 = config.thresholds or {}
     
     local thresholds = config.thresholds
     for tcp_flags_name, tcp_flags_num in pairs(tcp_flags) do
@@ -221,6 +223,9 @@ local load_config = function()
     for flow_status_name, flow_status_num in pairs(flow_status) do
         flow_status_reverse[flow_status_num] = flow_status_name
         table.insert(flow_status_iter,{flow_status_name,flow_status_num})
+    end
+    for metric_name, metric_num in pairs(metric) do
+        metric_reverse[metric_num] = metric_name
     end
 
     local interesting_ports = config.interesting_ports
@@ -308,11 +313,49 @@ local setup_db = function()
     box.space.buckets:create_index('by_ts',{unique = true, parts = {1, 'NUM'}, if_not_exists = true})
 
     -- Delete moving average bucket on start
-    box.space.buckets:delete({0})
+    -- box.space.buckets:delete({0})
 
     expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
+
+    -- Alerts: {{Timestamp}, Direction, Stat Type, Stat, Metric}, Value, Threshold, Duration
+    box.schema.space.create('alerts',{field_count=8,if_not_exists = true})
+    box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'NUM'}, if_not_exists = true})
+    box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
 end
 
+
+local alert2table = function(alert)
+    if alert == nil then
+        return nil
+    end
+    return {
+        ts        = alert[1],
+        direction = alert[2],
+        stat_type = alert[3],
+        stat      = alert[4],
+        metric    = alert[5],
+        value     = alert[6],
+        threshold = alert[7],
+        duration  = alert[8],
+    }
+end
+
+local alert2tuple = function(alert)
+    if alert == nil then
+        return nil
+    end
+
+    return {
+        alert.ts,
+        alert.direction,
+        alert.stat_type,
+        alert.stat,
+        alert.metric,
+        alert.value,
+        alert.threshold,
+        alert.duration,
+    }
+end
 
 local flow2table = function(flow)
     if flow == nil then
@@ -495,14 +538,14 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     local bgpDestinationAsNumber   = ebn.bgpDestinationAsNumber
     local flowEndReason            = ebn.flowEndReason
 
-    local metric_bps = metrics.fps
-    local metric_pps = metrics.pps
-    local metric_fps = metrics.fps
+    local metric_bps = metric.bps
+    local metric_pps = metric.pps
+    local metric_fps = metric.fps
 
     local bucket = {}
     local last_bucket_time = 0
 
-    local aggregate_stat = function(store,typ,stat,duration,values)
+    local aggregate_stat = function(store,typ,stat,values)
         if not store[typ] then
             store[typ] = {}
         end
@@ -512,9 +555,9 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 
         for key, value in ipairs(values) do
             if store[typ][stat][key] == nil then
-                store[typ][stat][key] = (value / duration)
+                store[typ][stat][key] = value
             else
-                store[typ][stat][key] = store[typ][stat][key] + (value / duration)
+                store[typ][stat][key] = store[typ][stat][key] + value
             end
         end
     end
@@ -532,7 +575,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
             end
             -- Reset bucket for directions
             bucket = { {}, {}, {} }
-            log.info('Bucket reset with ' .. packets .. ' packets, ' .. bits / 8 .. ' bytes and ' .. flows .. ' flows at ' .. bucket_time)
+            log.info('Bucket reset with ' .. packets .. ' packets, ' .. bits  / 1024 / 1024 .. ' Mbits and ' .. flows .. ' flows at ' .. bucket_time)
             last_bucket_time = bucket_time
             packets, bits, flows = 0,0,0
         end
@@ -622,7 +665,6 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                     tos,
                 }))
 
-
                 if existing_flow ~= nil then
                     flow_duration = (flow_end - existing_flow.end_ts) / 1000
                 else
@@ -641,37 +683,39 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 end
 
                 -- Make sure flow duration is never zero
+                -- Flows can be 0 length if they are a single UDP packet
+                -- In this case, just take the values as-is.
                 if flow_duration < 1 then
-                    flow_duration = 1 -- Shortest possible flow duration is 1s
+                    flow_duration = 1
+                    observed_pps = deltaPackets / bucket_length
+                    observed_bps = (deltaBytes * 8) / bucket_length
+                else
+                    observed_pps = (deltaPackets * (bucket_length / flow_duration)) / bucket_length
+                    observed_bps = ((deltaBytes * 8) * (bucket_length / flow_duration)) / bucket_length
                 end
 
-
-                observed_pps = deltaPackets
-                observed_bps = deltaBytes * 8
                 observed_fps = 1
 
                 packets = packets + observed_pps
                 bits    = bits + observed_bps
                 flows   = flows + observed_fps
 
-                -- log.info(table.concat({
-                --     flow_start,
-                --     flow_end,
-                --     proto_name(protocol),
-                --     flow_status_name(status), 
-                --     src_ip .. ':' .. src_port .. ' -> ' .. dst_ip .. ':' .. dst_port,
-                --     direction_name(flow_dir),
-                --     deltaPackets,
-                --     'packets',
-                --     deltaBytes,
-                --     'bytes',
-                --     flow_duration,
-                --     'seconds',
-                --     observed_pps,
-                --     'pps',
-                --     observed_bps,
-                --     'bps'
-                -- },' '))
+                --if observed_bps > (2*1024*1024) then
+                --    log.info(table.concat({
+                --        flow_start,
+                --        flow_end,
+                --        proto_name(protocol),
+                --        flow_status_name(status), 
+                --        src_ip .. ':' .. src_port .. ' -> ' .. dst_ip .. ':' .. dst_port,
+                --        direction_name(flow_dir),
+                --        flow_duration,
+                --        'seconds',
+                --        observed_pps,
+                --        'pps',
+                --        observed_bps / 1024 / 1024,
+                --        'Mbps'
+                --    },' '))
+                --end
 
                 -- We cheat and just put flows into 'now' slot
                 local now = fiber.time()
@@ -679,38 +723,38 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 local bucket_dir = bucket[flow_dir]
 
                 -- Global PPS / BPS / FPS
-                aggregate_stat(bucket_dir,'global','',bucket_length,{observed_bps,observed_pps,observed_fps})
+                aggregate_stat(bucket_dir,'global','',{observed_bps,observed_pps,observed_fps})
 
                 -- Protocol PPS / BPS / FPS
                 local proto_name = proto_name(protocol)
-                aggregate_stat(bucket_dir,'protocol',proto_name,bucket_length,{observed_bps,observed_pps,observed_fps})
+                aggregate_stat(bucket_dir,'protocol',proto_name,{observed_bps,observed_pps,observed_fps})
 
                 -- Subnet PPS / BPS / FPS
                 if subnet then
-                    aggregate_stat(bucket_dir,'subnet',subnet,bucket_length,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'subnet',subnet,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- IP PPS / BPS / FPS
                 if ip then
-                    aggregate_stat(bucket_dir,'ip',ip,bucket_length,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'ip',ip,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- Port PPS / BPS / FPS
                 if config.int_ports[src_port] then
-                    aggregate_stat(bucket_dir,'port',src_port,bucket_length,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'port',src_port,{observed_bps,observed_pps,observed_fps})
                 elseif config.int_ports[dst_port] then
-                    aggregate_stat(bucket_dir,'port',dst_port,bucket_length,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'port',dst_port,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- TCP Flags PPS / BPS / FPS
                 if protocol == proto.TCP then
                     for _, flag in ipairs(flags) do
-                        aggregate_stat(bucket_dir,'tcp_flag',flag[1],bucket_length,{observed_bps,observed_pps,observed_fps})
+                        aggregate_stat(bucket_dir,'tcp_flag',flag[1],{observed_bps,observed_pps,observed_fps})
                     end
                 end
                 -- ICMP Type/Code PPS / BPS / FPS
                 if protocol == proto.ICMP then
-                    aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],bucket_length,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- Store flow for use if an alert is triggered
@@ -748,7 +792,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     end
 end
 
-local bucket_monitor = function(aggregate_channel,graphite_channel)
+local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel)
     local self = fiber.self()
     self:name("ipfix/bucket-monitor")
 
@@ -756,15 +800,72 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
     local active_timeout = config.active_timeout
     local idle_timeout   = config.idle_timeout
 
+    -- Time over which to apply Exponentially Weighted Moving Average
     local average_calculation_period = config.average_calculation_period
+
+    -- Delay before we start applying percentage based thresholds to historical data
+    local initial_delay = (average_calculation_period * 3)
 
     log.info('Calculating moving averages over a ' .. average_calculation_period .. 's period')
 
+    local started = fiber.time()
+
     local spc_buckets = box.space.buckets
+    
+    local thresholds = config.thresholds
+
+    local add_broken_threshold = function(broken,direction,stat_type,stat,metric,value,threshold)
+        if type(broken) == 'table' then
+            if not broken.direction then
+                broken.direction = {direction}
+            else
+                table.insert(broken.direction,direction)
+            end
+            if not broken.metric then
+                broken.metric = {metric}
+            else
+                table.insert(broken.metric,metric)
+            end
+            if not broken.stat_type then
+                broken.stat_type = {stat_type}
+            else
+                table.insert(broken.stat_type,stat_type)
+            end
+            if not broken.stat then
+                broken.stat = {stat}
+            else
+                table.insert(broken.stat,stat)
+            end
+            if not broken.value then
+                broken.value = {value}
+            else
+                table.insert(broken.value,value)
+            end
+            if not broken.threshold then
+                broken.threshold = {threshold}
+            else
+                table.insert(broken.threshold,threshold)
+            end
+        else
+            broken = {
+                metric    = metric,
+                stat_type = stat_type,
+                stat      = stat,
+                value     = value,
+                threshold = threshold,
+                direction = direction,
+            }
+        end
+        return broken
+    end
+
+    local metric_offsets = {'bps','pps','fps'}
 
     while 1 == 1 do
         local bucket_data = aggregate_channel:get() 
         local bucket_ts,bucket_stats = bucket_data[1], bucket_data[2]
+
+        local now = fiber.time()
 
         local graphite_output = {}
         
@@ -788,13 +889,13 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
                 for stat_type, stats in pairs(stat_types) do
                     for stat, values in pairs(stats) do
                         local sanitized_stat_name = tostring(stat):lower():gsub('/','_'):gsub('%.','_')
-
+                        local direction_str = direction_name(direction)
                         -- Submit statistic to graphite
                         local graphite_name = table.concat({
                             'flow',
                             stat_type:lower(),
                             sanitized_stat_name,
-                            direction_name(direction),
+                            direction_str,
                         },'.'):gsub('%.%.','.')
 
                         -- We don't need ridiculous decimal precision here and the numbers are large
@@ -814,19 +915,70 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
 
                             -- If stat isn't set then set it to start values
                             if avg_bucket.data[direction][stat_type][stat] == nil then
-                                avg_bucket.data[direction][stat_type][stat] = avg_values
+                                values[4] = values[1]
+                                values[5] = values[2]
+                                values[6] = values[3]
+                                avg_bucket.data[direction][stat_type][stat] = values
                             else
-                                -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
                                 local avg_values = avg_bucket.data[direction][stat_type][stat]
-                                local exp_value = math.exp(-bucket_length/average_calculation_period)
 
-                                avg_values[1] = values[1] + exp_value * (avg_values[1] - values[1])
-                                avg_values[2] = values[2] + exp_value * (avg_values[2] - values[2])
-                                avg_values[3] = values[3] + exp_value * (avg_values[3] - values[3])
+                                -- Add fields if missing for slow EWMA
+                                if #avg_values == 3 then
+                                    avg_values[4] = avg_values[1]
+                                    avg_values[5] = avg_values[2]
+                                    avg_values[6] = avg_values[3]
+                                end
+
+
+                                -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
+                                local fast_exp_value = math.exp(-bucket_length/average_calculation_period)
+                                local slow_exp_value = math.exp(-bucket_length/(average_calculation_period * 30))
+
+                                -- Fast moving average, used for graphing
+                                avg_values[1] = values[1] + fast_exp_value * (avg_values[1] - values[1])
+                                avg_values[2] = values[2] + fast_exp_value * (avg_values[2] - values[2])
+                                avg_values[3] = values[3] + fast_exp_value * (avg_values[3] - values[3])
+
+                                -- Slow moving average, used for historical heuristic thresholding
+                                avg_values[4] = values[1] + slow_exp_value * (avg_values[4] - values[1])
+                                avg_values[5] = values[2] + slow_exp_value * (avg_values[5] - values[2])
+                                avg_values[6] = values[3] + slow_exp_value * (avg_values[6] - values[3])
 
                                 graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
                                 graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
                                 graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
+
+                                if thresholds[direction_str] and thresholds[direction_str][stat_type] and
+                                  thresholds[direction_str][stat_type][stat] then
+                                    local broken
+                                    local threshold_values = thresholds[direction_str][stat_type][stat]
+
+                                    for offset,metric in ipairs(metric_reverse) do
+                                        if threshold_values[metric] and threshold_values[metric].abs < avg_values[offset] then 
+                                            broken = add_broken_threshold(broken,direction_str,stat_type,stat,metric,avg_values[offset],threshold_values[metric].abs)
+                                        end
+                                    end
+
+                                    -- Perform heuristic thresholding based on historical moving average
+                                    if now - started > initial_delay then
+                                        for offset,metric in ipairs(metric_reverse) do
+                                            local long_offset = 3 + offset
+                                            if threshold_values[metric] and threshold_values[metric].pct then
+                                                local threshold = (avg_values[long_offset] * (threshold_values[metric].pct / 100))
+                                                if avg_values[offset] > (avg_values[long_offset] * (threshold_values[metric].pct / 100)) then
+                                                    broken = add_broken_threshold(broken,direction_str,stat_type,stat,metric,avg_values[offset],threshold)
+                                                end
+                                            end
+                                        end
+                                    else
+                                        lp.dequeue('We dont have enough history for heuristic thresholding, using absolute thresholds only...',10)
+                                    end
+
+                                    -- If any of our thresholds have been broken, submit the broken results to our alerter.
+                                    if broken then
+                                        alert_channel:put(broken)
+                                    end
+                                end
                             end
                         end
                     end
@@ -841,6 +993,22 @@ local bucket_monitor = function(aggregate_channel,graphite_channel)
 
         fiber.sleep(0.1)
     end
+end
+
+local bucket_alerter = function(alert_channel)
+    local self = fiber.self()
+    self:name("ipfix/bucket-alerter")
+
+    local spc_alerts = box.space.alerts
+    while 1 == 1 do
+        local alert = alert_channel:get()
+
+        if alert then
+            rPrint(alert)
+        end
+        fiber.sleep(0.1)
+    end
+
 end
 
 local graphite_submitter = function(graphite_channel)
@@ -885,11 +1053,6 @@ end
 local listener_ports = {}
 
 local start_ipfix_listener = function(port,channel)
-    if not listener_ports[port] then
-        log.info("Starting listener on port " .. port)
-        fiber.create(ipfix_listener,port,channel)
-        listener_ports[port] = true
-    end
 end
 
 local ipfix_background_saver = function()
@@ -908,22 +1071,51 @@ local start_fibers = function()
     local ipfix_channel     = fiber.channel(config.fiber_channel_capacity or 1024)
     local aggregate_channel = fiber.channel(1024)
     local graphite_channel  = fiber.channel(8192)
+    local alert_channel     = fiber.channel(1024)
 
-    fiber.create(ipfix_background_saver)
+    local bgsaver, aggregator, monitor, submitter, alerter
+    local listeners = {}
 
-    -- Write to ipfix_channel
-    for _, port in ipairs(config.ports) do
-        start_ipfix_listener(port,ipfix_channel)
+    while 1 == 1 do
+        
+        if not bgsaver or bgsaver.status() == 'dead' then
+            log.info('(Re)starting background saver')
+            bgsaver = fiber.create(ipfix_background_saver)
+        end
+
+        -- Write to ipfix_channel
+        for _, port in ipairs(config.ports) do
+            if not listeners[port] or listeners[port].status() == 'dead'  then
+                log.info("(Re)starting IPFIX listener on port " .. port)
+                listeners[port] = fiber.create(ipfix_listener,port,ipfix_channel)
+            end
+        end
+
+        -- Read from ipfix_channel, write to aggregate_channel
+        if not aggregator or aggregator.status() == 'dead' then
+            log.info('(Re)starting aggregator')
+            aggregator = fiber.create(ipfix_aggregator,ipfix_channel,aggregate_channel) 
+        end
+
+        -- Read from aggregate_channel, write to graphite_channel
+        if not monitor or monitor.status() == 'dead' then
+            log.info('(Re)starting monitor')
+            monitor = fiber.create(bucket_monitor,aggregate_channel,graphite_channel,alert_channel)
+        end
+
+        -- Read from alert_channel
+        if not alerter or alerter.status() == 'dead' then
+            log.info('(Re)starting alerter')
+            alerter = fiber.create(bucket_alerter,alert_channel)
+        end
+
+        -- Read from graphite_channel
+        if not submitter or submitter.status() == 'dead' then
+            log.info('(Re)starting graphite submitter')
+            submitter = fiber.create(graphite_submitter,graphite_channel)
+        end
+        fiber.sleep(5)
     end
-
-    -- Read from ipfix_channel, write to aggregate_channel
-    fiber.create(ipfix_aggregator,ipfix_channel,aggregate_channel) 
-
-    -- Read from aggregate_channel, write to graphite_channel
-    fiber.create(bucket_monitor,aggregate_channel,graphite_channel)
-
-    -- Read from graphite_channel
-    fiber.create(graphite_submitter,graphite_channel)
 end
 
 local start_http_server = function()
