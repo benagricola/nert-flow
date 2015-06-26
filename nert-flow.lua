@@ -563,9 +563,12 @@ local member_alert_deactivate = function(space_id,args,tuple)
     spc_alerts_historic:insert(alert_tuple)
     spc_alerts:delete({alert_tuple[1],alert_tuple[2],alert_tuple[3],alert_tuple[4],alert_tuple[5]})
 
-    if not alert.notified_end then
-        if events.trigger('alert_inactive',alert.duration,alert.details) then
-            alert.notified_end = true
+    -- Dont show expired message for alert which hasn't been notified yet
+    if alert.notified_start then
+        if not alert.notified_end then
+            if events.trigger('alert_inactive',alert.duration,alert.details) then
+                alert.notified_end = true
+            end
         end
     end
 end
@@ -1513,7 +1516,6 @@ local bucket_alerter = function(alert_channel)
                 end
             end
 
-            rPrint(alert)
             -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, {Updated Timestamp}
             local added_alert = spc_alerts:replace(alert2tuple(alert))
         end
