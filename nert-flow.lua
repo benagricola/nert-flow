@@ -597,7 +597,9 @@ local setup_db = function()
     expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
 
     -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, Details, {Updated Timestamp}
-    box.space.alerts:drop()
+    if box.space.alerts then
+        box.space.alerts:drop()
+    end
     box.schema.space.create('alerts',{field_count=13,if_not_exists = true})
     box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR'}, if_not_exists = true})
     box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
