@@ -25,6 +25,31 @@
   bucket_count: 360
   ports:
     - 2055
+  defaults:
+    notification_endpoints:
+      hipchat_sysadmins: &hipchat_sysadmins
+        url:            'http://api.hipchat.com/v2/room/1/notification?auth_token=AbCdEfGhIjKlMnOpQrStUvWxYz987654321' 
+        notify:         false
+        message_format: 'html'
+  events:
+    on_active_alert:
+      events:
+        alert_active:
+          # Only fire this event after 30 seconds
+          delay: 30 
+      actions:
+        hipchat:
+          endpoint: *hipchat_sysadmins
+          color:    'red'
+          message:  '<strong>Traffic Anomaly Detected</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
+    on_inactive_alert:
+      events:
+        alert_inactive: {}
+      actions:
+        hipchat:
+          endpoint: *hipchat_sysadmins
+          color:    'green'
+          message:  '<strong>Traffic Anomaly Expired</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Expired:</strong> %(end_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
   thresholds:
     inbound:
       subnet:

@@ -1,4 +1,11 @@
 #!/usr/bin/env tarantool
+local dirname     = require("fio").dirname
+
+-- Set location of executed file into package.path
+local root    = dirname(arg[0])
+
+package.path = package.path .. ";" .. root .. "/?.lua;" .. root .. '/lib/?.lua'
+
 local os          = require("os")
 local binutil     = require("binutil")
 local ipfix       = require("ipfix")
@@ -16,10 +23,12 @@ local fiber       = require("fiber")
 local yaml        = require("yaml")
 local log         = require("log")
 local log_error   = log.error
-local log_info   = log.info
+local log_info    = log.info
 local log_debug   = log.debug
 local json        = require("json")
 local json_encode = json.encode
+
+local events      = require("events")
 
 local socket      = require("socket")
 
@@ -75,6 +84,12 @@ local metric = {
     bps = 1,
     pps = 2,
     fps = 3,
+}
+
+local metric_totals = {
+    bps = 4,
+    pps = 5,
+    fps = 6,
 }
 
 local flow_status = {
@@ -151,7 +166,11 @@ local direction_reverse   = {}
 local direction_iter      = {}
 local flow_status_reverse = {}
 local flow_status_iter    = {}
-local metric_reverse     = {}
+local metric_reverse      = {}
+local metric_totals_reverse      = {}
+local ip_addr             = {}
+local ip_addr_reverse     = {}
+local ip_addr_iter        = {}
 
 
 local tcp_flags_name = function(tcp_flags_num)
@@ -204,9 +223,16 @@ local load_config = function()
     config.bucket_count               = config.bucket_count or 360
     config.ports                      = config.ports or { 2055 }
     config.max_history                = config.bucket_length * config.bucket_count
+    config.alert_expiry_time          = config.alert_expiry_time or 60
     config.average_calculation_period = config.average_calculation_period or (config.bucket_length * 3)
     config.thresholds                 = config.thresholds or {}
+    config.attack_protocol_ratio      = config.attack_protocol_ratio or 0.9
     
+    -- Create reverse lookup structures for 'constants'
+    -- Also create iterable structures for 'constants' which 
+    -- are not numerically in sequence (i.e. not 1,2,3 but 4,6,17 etc)
+    -- This means we can use them with ipairs but have to unpack the table
+
     local thresholds = config.thresholds
     for tcp_flags_name, tcp_flags_num in pairs(tcp_flags) do
         tcp_flags_reverse[tcp_flags_num] = tcp_flags_name
@@ -227,6 +253,9 @@ local load_config = function()
     for metric_name, metric_num in pairs(metric) do
         metric_reverse[metric_num] = metric_name
     end
+    for metric_totals_name, metric_totals_num in pairs(metric_totals) do
+        metric_totals_reverse[metric_totals_num] = metric_totals_name
+    end
 
     local interesting_ports = config.interesting_ports
     config.int_ports = {}
@@ -238,8 +267,18 @@ local load_config = function()
     config.integer_subnets = {}
     for _,subnet in ipairs(config.subnets) do
         local sub_lo, sub_high = ip.cidr_to_integer_range(subnet)
-        table.insert(config.integer_subnets,{sub_lo,sub_high})
+        -- For each subnet, generate list of IPs
+        for i = sub_lo, sub_high do
+            -- Get IP address without subnet mask
+            local ip_address = ip.integer_range_to_cidr(i,false)
+            table.insert(ip_addr_iter,{ip_address,i})
+            ip_addr[ip_address]     = i
+            ip_addr_reverse[i] = ip_address
+        end
+        table.insert(config.integer_subnets,{sub_lo,sub_high,subnet})
     end
+
+    events.set_config(config)
 end
 
 local load_ipfix = function()
@@ -266,77 +305,103 @@ end
 local in_subnet = function(subnet)
     local subnets = config.integer_subnets
     for i=1, #subnets do
-        local sub_low, sub_high = unpack(subnets[i])
+        local sub_low, sub_high, cidr = unpack(subnets[i])
 
-        local ip_low, ip_high = ip.cidr_to_integer_range(subnet.. '/32')
+        local ip_low, ip_high = ip.cidr_to_integer_range(subnet)
 
         if ip_low > sub_low and ip_high < sub_high then
-            return ip.integer_range_to_cidr(sub_low,sub_high)
+            return cidr
         end
     end
     return nil
 end
 
-local flow_expired = function(args,tuple)
-    -- Flows are stored with millisecond precision
-    return tuple[1] < ((fiber.time() * 1000) - args.max_history)
+local pretty_duration = function(duration)
+    local pretty_table = {}
+
+    -- Durations are in seconds
+    -- If duration is more than an hour
+    if duration > 3600 then
+        hours = math.floor(duration / 3600)
+        duration = duration - hours * 3600
+        table.insert(pretty_table,string.format('%dh',hours))
+    end
+
+    if duration > 60 then
+        minutes = math.floor(duration / 60)
+        duration = duration - minutes * 60
+        table.insert(pretty_table,string.format('%dm',minutes))
+    end
+    if duration > 0 then
+        table.insert(pretty_table,string.format('%ds',duration))
+    end
+
+    return table.concat(pretty_table,' ')
 end
 
--- Special case so we don't remove the average bucket at timestamp 0
-local bucket_expired = function(args,tuple)
-    return tuple[1] < (fiber.time() - args.max_history) and tuple[1] ~= 0
+local pretty_value = function(value,typ)
+    if typ == metric.bps then
+        -- Display in Mbit
+        return string.format('%.2f Mbps', value / 1048576)
+    end
+    if typ == metric.pps then
+        -- Display in Kpps
+        return string.format('%.2f Kpps', value / 1000)
+    end
+    if typ == metric.fps then
+        -- Display in Kfps
+        return string.format('%.2f Kfps', value / 1000)
+    end
+    if typ == metric_totals.bps then
+        -- Display in Gbytes
+        return string.format('%.2f Gbytes', value / 1073741824)
+    end
+    if typ == metric_totals.pps then
+        -- Display in Million packets 
+        return string.format('%.2f Mpackets', value / 1048576)
+    end
+    if typ == metric_totals.fps then
+        -- Display in Million flows
+        return string.format('%.2f Mflows', value / 1048576)
+    end
+
+    return tostring(value)
 end
 
-local member_flows_delete = function(space_id,args,tuple)
-    box.space[space_id]:delete({tuple[1],tuple[3],tuple[4],tuple[5],tuple[6],tuple[7],tuple[8]})
+local uc_first = function(str)
+    return (str:gsub("^%l", string.upper))
 end
 
-local member_bucket_delete = function(space_id,args,tuple)
-    box.space[space_id]:delete({tuple[1]})
+local dedup_keys = function(input,use_values)
+    local output = {}
+    for key, value in pairs(input) do
+        if use_values then
+            table.insert(output,table.concat({key,value},' '))
+        else
+            table.insert(output,key)
+        end
+    end
+    return output
 end
-
-local setup_db = function()
-    -- FLOWS: {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
-    box.schema.space.create('flows',{field_count=10,if_not_exists = true})
-    box.space.flows:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
-    box.space.flows:create_index('by_end_ts',{unique = false, parts = {2, 'NUM', 3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
-    box.space.flows:create_index('by_hash',{unique = false, parts = {3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
-    box.space.flows:create_index('by_dst_ip',{unique = false, parts = {5, 'STR'}, if_not_exists = true})
-    box.space.flows:create_index('by_src_ip',{unique = false, parts = {3, 'STR'}, if_not_exists = true})
-    box.space.flows:create_index('by_dst_port',{unique = false, parts = {6, 'NUM'}, if_not_exists = true})
-    box.space.flows:create_index('by_src_port',{unique = false, parts = {4, 'NUM'}, if_not_exists = true})
-    expirationd.run_task('expire_flows', box.space.flows.id, flow_expired, member_flows_delete, {max_history = config.max_history}, 1000, 3600)
-
-    -- FLOWS: {Timestamp}, Data 
-    box.schema.space.create('buckets',{field_count=2,if_not_exists = true})
-    box.space.buckets:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM'}, if_not_exists = true})
-    box.space.buckets:create_index('by_ts',{unique = true, parts = {1, 'NUM'}, if_not_exists = true})
-
-    -- Delete moving average bucket on start
-    -- box.space.buckets:delete({0})
-
-    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
-
-    -- Alerts: {{Timestamp}, Direction, Stat Type, Stat, Metric}, Value, Threshold, Duration
-    box.schema.space.create('alerts',{field_count=8,if_not_exists = true})
-    box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'NUM'}, if_not_exists = true})
-    box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
-end
-
 
 local alert2table = function(alert)
     if alert == nil then
         return nil
     end
     return {
-        ts        = alert[1],
-        direction = alert[2],
-        stat_type = alert[3],
-        stat      = alert[4],
-        metric    = alert[5],
-        value     = alert[6],
-        threshold = alert[7],
-        duration  = alert[8],
+        start_ts       = alert[1],
+        direction      = alert[2],
+        stat_type      = alert[3],
+        stat           = alert[4],
+        metric         = alert[5],
+        active         = alert[6] == 1,
+        value          = alert[7],
+        threshold      = alert[8],
+        duration       = alert[9],
+        notified_start = alert[10],
+        notified_end   = alert[11],
+        details        = alert[12],
+        updated_ts     = alert[13],
     }
 end
 
@@ -345,15 +410,26 @@ local alert2tuple = function(alert)
         return nil
     end
 
+    local active
+    if alert.active then
+        active = 1
+    else
+        active = 0
+    end
     return {
-        alert.ts,
+        alert.start_ts,
         alert.direction,
         alert.stat_type,
         alert.stat,
         alert.metric,
+        active,
         alert.value,
         alert.threshold,
         alert.duration,
+        alert.notified_start or false,
+        alert.notified_end or false,
+        alert.details or {},
+        alert.updated_ts,
     }
 end
 
@@ -373,6 +449,7 @@ local flow2table = function(flow)
         tos         = flow[8],
         subnet      = flow[9],
         ip          = flow[10],
+        direction   = flow[11],
     }
 end
 
@@ -392,6 +469,7 @@ local flow2tuple = function(flow)
         flow.tos,
         flow.subnet,
         flow.ip,
+        flow.direction,
     }
 end
 
@@ -415,6 +493,124 @@ local bucket2tuple = function(bucket)
         bucket.data,
     }
 end
+
+local flow_expired = function(args,tuple)
+    -- Flows are stored with millisecond precision
+    return tuple[1] < ((fiber.time() * 1000) - args.max_history)
+end
+
+-- Special case so we don't remove the average bucket at timestamp 0
+local bucket_expired = function(args,tuple)
+    return tuple[1] < (fiber.time() - args.max_history) and tuple[1] ~= 0
+end
+
+local member_flows_delete = function(space_id,args,tuple)
+    box.space[space_id]:delete({tuple[1],tuple[3],tuple[4],tuple[5],tuple[6],tuple[7],tuple[8]})
+end
+
+local member_bucket_delete = function(space_id,args,tuple)
+    box.space[space_id]:delete({tuple[1]})
+end
+
+local alert_expired = function(args,tuple)
+    local alert = alert2table(tuple)
+    local now = fiber.time()
+
+    -- If alert was last updated more than 60s ago and active, then expire
+    local expired = alert.active and now - alert.updated_ts > args.inactive_expiry_time
+    return expired
+
+end
+
+local format_alert_details = function(alert)
+--    'target_'..dir_name .. '_metric..'_pretty'
+    local pretty_format_str = table.concat({
+        "Subnet: %(subnet_pretty)",
+        "Attack Type: %(protocol_name_pretty)",
+        "Condition: %(value_pretty) > %(threshold_pretty)",
+        "Peak Global Traffic IN:      %(global_inbound_bps_pretty) / %(global_inbound_pps_pretty) / %(global_inbound_fps_pretty)",
+        "Peak Global Traffic OUT:     %(global_outbound_bps_pretty) / %(global_outbound_pps_pretty) / %(global_outbound_fps_pretty)",
+    },'\n')
+    if alert.details.target_pretty then
+        pretty_format_str = table.concat({"IP: %(target_pretty)",pretty_format_str},'\n')
+        pretty_format_str = table.concat({
+            pretty_format_str,
+            "Peak Target Traffic IN:      %(target_inbound_bps_pretty) / %(target_inbound_pps_pretty) / %(target_inbound_fps_pretty)",
+            "Peak Target Traffic OUT:     %(target_outbound_bps_pretty) / %(target_outbound_pps_pretty) / %(target_outbound_fps_pretty)",
+            "Avg Target Attack Traffic:   %(avg_directed_bps_pretty) / %(avg_directed_pps_pretty) / %(avg_directed_fps_pretty)",
+            "Total Target Attack Traffic: %(total_directed_bps_pretty) / %(total_directed_pps_pretty) / %(total_directed_fps_pretty)",
+        },'\n')
+    end
+    return pretty_format_str % alert.details
+end
+
+local member_alert_deactivate = function(space_id,args,tuple)
+    local alert = alert2table(tuple)
+    local now   = math_ceil(fiber.time())
+
+    alert.active     = false
+    alert.updated_ts = now
+    alert.duration = alert.updated_ts - alert.start_ts
+
+    alert.details.attack_details = format_alert_details(alert)
+
+    -- Update in db
+    local spc_alerts          = box.space.alerts
+    local spc_alerts_historic = box.space.alerts_historic
+
+    local alert_tuple = alert2tuple(alert)
+
+    spc_alerts_historic:insert(alert_tuple)
+    spc_alerts:delete({alert_tuple[1],alert_tuple[2],alert_tuple[3],alert_tuple[4],alert_tuple[5]})
+
+    if not alert.notified_end then
+        if events.trigger('alert_inactive',alert.duration,alert.details) then
+            alert.notified_end = true
+        end
+    end
+end
+
+local setup_db = function()
+    -- FLOWS: {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP, Direction
+    box.schema.space.create('flows',{field_count=11,if_not_exists = true})
+    box.space.flows:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
+    box.space.flows:create_index('by_end_ts',{unique = false, parts = {2, 'NUM', 3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
+    box.space.flows:create_index('by_hash',{unique = false, parts = {3, 'STR', 4, 'NUM', 5, 'STR', 6, 'NUM', 7, 'NUM', 8, 'NUM'}, if_not_exists = true})
+    box.space.flows:create_index('by_dst_ip',{unique = false, parts = {5, 'STR'}, if_not_exists = true})
+    box.space.flows:create_index('by_src_ip',{unique = false, parts = {3, 'STR'}, if_not_exists = true})
+    box.space.flows:create_index('by_dst_port',{unique = false, parts = {6, 'NUM'}, if_not_exists = true})
+    box.space.flows:create_index('by_src_port',{unique = false, parts = {4, 'NUM'}, if_not_exists = true})
+    box.space.flows:create_index('by_dir_subnet',{unique = false, parts = {9, 'STR',11,'NUM'}, if_not_exists = true})
+    expirationd.run_task('expire_flows', box.space.flows.id, flow_expired, member_flows_delete, {max_history = config.max_history}, 1000, 3600)
+
+    -- FLOWS: {Timestamp}, Data 
+    box.schema.space.create('buckets',{field_count=2,if_not_exists = true})
+    box.space.buckets:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM'}, if_not_exists = true})
+    box.space.buckets:create_index('by_ts',{unique = true, parts = {1, 'NUM'}, if_not_exists = true})
+
+    -- Delete moving average bucket on start
+    -- box.space.buckets:delete({0})
+
+    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
+
+    -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, Details, {Updated Timestamp}
+    box.space.alerts:drop()
+    box.schema.space.create('alerts',{field_count=13,if_not_exists = true})
+    box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR'}, if_not_exists = true})
+    box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
+    box.space.alerts:create_index('by_updated_ts',{unique = false, parts = {13, 'NUM'}, if_not_exists = true})
+    box.space.alerts:create_index('by_hash',{unique = true, parts = {2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR', 6, 'NUM'}, if_not_exists = true})
+
+    -- This is important. We use alert expiry to set the alert to *inactive* and trigger an event
+    expirationd.run_task('expire_alerts', box.space.alerts.id, alert_expired, member_alert_deactivate, {inactive_expiry_time = config.alert_expiry_time}, 10, config.alert_expiry_time)
+
+    -- Store expired alerts
+    --box.space.alerts_historic:drop()
+    box.schema.space.create('alerts_historic',{field_count=13,if_not_exists = true})
+    box.space.alerts_historic:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR'}, if_not_exists = true})
+    box.space.alerts_historic:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
+end
+
 
 local ipfix_listener = function(port,channel)
 
@@ -549,8 +745,17 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
         if not store[typ] then
             store[typ] = {}
         end
+        -- If stat is a table then someone omitted the stat variable
+        -- Assume stat = typ and values = stat
+        if type(stat) == 'table' then
+            values = stat
+            stat = typ
+        end
+            
+            
         if not store[typ][stat] then
             store[typ][stat] = {}
+            setmetatable(store[typ][stat], { __index = function() return 0 end })
         end
 
         for key, value in ipairs(values) do
@@ -565,7 +770,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     local packets, bits, flows = 0,0,0
 
     while 1 == 1 do
-        local now = fiber.time()
+        local now = math_ceil(fiber.time())
         local bucket_time = now - now % bucket_length
 
         -- Reset bucket if we're switching to a new one
@@ -685,8 +890,8 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 -- Make sure flow duration is never zero
                 -- Flows can be 0 length if they are a single UDP packet
                 -- In this case, just take the values as-is.
-                if flow_duration < 1 then
-                    flow_duration = 1
+                if flow_duration < 0.5 then
+                    flow_duration = 0.5
                     observed_pps = deltaPackets / bucket_length
                     observed_bps = (deltaBytes * 8) / bucket_length
                 else
@@ -718,72 +923,76 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 --end
 
                 -- We cheat and just put flows into 'now' slot
-                local now = fiber.time()
 
                 local bucket_dir = bucket[flow_dir]
 
                 -- Global PPS / BPS / FPS
-                aggregate_stat(bucket_dir,'global','',{observed_bps,observed_pps,observed_fps})
+                aggregate_stat(bucket_dir,'global',{observed_bps,observed_pps,observed_fps})
 
-                -- Protocol PPS / BPS / FPS
+                -- Global Protocol PPS / BPS / FPS
                 local proto_name = proto_name(protocol)
                 aggregate_stat(bucket_dir,'protocol',proto_name,{observed_bps,observed_pps,observed_fps})
 
                 -- Subnet PPS / BPS / FPS
                 if subnet then
                     aggregate_stat(bucket_dir,'subnet',subnet,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'protocol_subnet_' .. subnet,proto_name,{observed_bps,observed_pps,observed_fps})
                 end
 
                 -- IP PPS / BPS / FPS
                 if ip then
                     aggregate_stat(bucket_dir,'ip',ip,{observed_bps,observed_pps,observed_fps})
+                    aggregate_stat(bucket_dir,'protocol_ip_' .. ip,proto_name,{observed_bps,observed_pps,observed_fps})
                 end
 
-                -- Port PPS / BPS / FPS
+                -- Global Port PPS / BPS / FPS
                 if config.int_ports[src_port] then
                     aggregate_stat(bucket_dir,'port',src_port,{observed_bps,observed_pps,observed_fps})
                 elseif config.int_ports[dst_port] then
                     aggregate_stat(bucket_dir,'port',dst_port,{observed_bps,observed_pps,observed_fps})
                 end
 
-                -- TCP Flags PPS / BPS / FPS
+                -- Global / Subnet / IP TCP Flags PPS / BPS / FPS
                 if protocol == proto.TCP then
                     for _, flag in ipairs(flags) do
                         aggregate_stat(bucket_dir,'tcp_flag',flag[1],{observed_bps,observed_pps,observed_fps})
+                        if subnet then
+                            aggregate_stat(bucket_dir,'tcp_flag_subnet_' .. subnet,flag[1],{observed_bps,observed_pps,observed_fps})
+                        end
+                        if ip then
+                            aggregate_stat(bucket_dir,'tcp_flag_ip_' .. ip,flag[1],{observed_bps,observed_pps,observed_fps})
+                        end
+
                     end
                 end
+
                 -- ICMP Type/Code PPS / BPS / FPS
                 if protocol == proto.ICMP then
                     aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                    if subnet then
+                        aggregate_stat(bucket_dir,'icmp_typecode_subnet_' .. subnet,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                    end
+                    if ip then
+                        aggregate_stat(bucket_dir,'icmp_typecode_ip_' .. ip,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                    end
                 end
 
                 -- Store flow for use if an alert is triggered
                 -- {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
 
-                if status == flow_status.active_timeout then
-                    spc_flows:replace({
-                        flow_start,
-                        flow_end,
-                        src_ip,
-                        src_port,
-                        dst_ip,
-                        dst_port,
-                        protocol,
-                        tos,
-                        subnet or '',
-                        ip or '',
-                    })
-                else
-                    spc_flows:delete({
-                        flow_start,
-                        src_ip,
-                        src_port,
-                        dst_ip,
-                        dst_port,
-                        protocol,
-                        tos,
-                    })
-                end         
+                spc_flows:replace({
+                    flow_start,
+                    flow_end,
+                    src_ip,
+                    src_port,
+                    dst_ip,
+                    dst_port,
+                    protocol,
+                    tos,
+                    subnet or '',
+                    ip or '',
+                    flow_dir or direction.unknown,
+                })
 
             end
         else
@@ -814,53 +1023,6 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
     
     local thresholds = config.thresholds
 
-    local add_broken_threshold = function(broken,direction,stat_type,stat,metric,value,threshold)
-        if type(broken) == 'table' then
-            if not broken.direction then
-                broken.direction = {direction}
-            else
-                table.insert(broken.direction,direction)
-            end
-            if not broken.metric then
-                broken.metric = {metric}
-            else
-                table.insert(broken.metric,metric)
-            end
-            if not broken.stat_type then
-                broken.stat_type = {stat_type}
-            else
-                table.insert(broken.stat_type,stat_type)
-            end
-            if not broken.stat then
-                broken.stat = {stat}
-            else
-                table.insert(broken.stat,stat)
-            end
-            if not broken.value then
-                broken.value = {value}
-            else
-                table.insert(broken.value,value)
-            end
-            if not broken.threshold then
-                broken.threshold = {threshold}
-            else
-                table.insert(broken.threshold,threshold)
-            end
-        else
-            broken = {
-                metric    = metric,
-                stat_type = stat_type,
-                stat      = stat,
-                value     = value,
-                threshold = threshold,
-                direction = direction,
-            }
-        end
-        return broken
-    end
-
-    local metric_offsets = {'bps','pps','fps'}
-
     while 1 == 1 do
         local bucket_data = aggregate_channel:get() 
         local bucket_ts,bucket_stats = bucket_data[1], bucket_data[2]
@@ -887,96 +1049,123 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
             for direction, stat_types in ipairs(bucket_stats) do
                 -- For each type
                 for stat_type, stats in pairs(stat_types) do
-                    for stat, values in pairs(stats) do
-                        local sanitized_stat_name = tostring(stat):lower():gsub('/','_'):gsub('%.','_')
-                        local direction_str = direction_name(direction)
-                        -- Submit statistic to graphite
-                        local graphite_name = table.concat({
-                            'flow',
-                            stat_type:lower(),
-                            sanitized_stat_name,
-                            direction_str,
-                        },'.'):gsub('%.%.','.')
+                    -- We only care about certain stat types for averaging
+                    -- if stat_type == 'global' 
+                    --     or stat_type == 'ip' 
+                    --     or stat_type == 'subnet' 
+                    --     or stat_type == 'protocol'
+                    --     or stat_type == 'port'
+                    --     or stat_type == 'tcp_flag'
+                    --     or stat_type == 'icmp_typecode' then
+                    if true then
+                        for stat, values in pairs(stats) do
+                            local sanitized_stat_name = tostring(stat):lower():gsub('/','_'):gsub('%.','_')
 
-                        -- We don't need ridiculous decimal precision here and the numbers are large
-                        -- So lets just ceil the values instead of doing some ridiculous accurate rounding
-                        graphite_channel:put({graphite_name .. '.bps',math_ceil(values[1]),bucket_ts})
-                        graphite_channel:put({graphite_name .. '.pps',math_ceil(values[2]),bucket_ts})
-                        graphite_channel:put({graphite_name .. '.fps',math_ceil(values[3]),bucket_ts})
-
-                        if avg_bucket ~= nil then
-                            if avg_bucket.data[direction] == nil then
-                                avg_bucket.data[direction] = {}
+                            -- If these are equal then the graphite path would be stat_type.stat_type which we dont want
+                            if sanitized_stat_name == stat_type then
+                                sanitized_stat_name = ''
                             end
 
-                            if avg_bucket.data[direction][stat_type] == nil then
-                                avg_bucket.data[direction][stat_type] = {}
-                            end
+                            local direction_str = direction_name(direction)
+                            -- Submit statistic to graphite
+                            local graphite_name = table.concat({
+                                'flow',
+                                stat_type:lower(),
+                                sanitized_stat_name,
+                                direction_str,
+                            },'.'):gsub('%.%.','.')
 
-                            -- If stat isn't set then set it to start values
-                            if avg_bucket.data[direction][stat_type][stat] == nil then
-                                values[4] = values[1]
-                                values[5] = values[2]
-                                values[6] = values[3]
-                                avg_bucket.data[direction][stat_type][stat] = values
-                            else
-                                local avg_values = avg_bucket.data[direction][stat_type][stat]
+                            -- We don't need ridiculous decimal precision here and the numbers are large
+                            -- So lets just ceil the values instead of doing some ridiculous accurate rounding
+                            graphite_channel:put({graphite_name .. '.bps',math_ceil(values[1]),bucket_ts})
+                            graphite_channel:put({graphite_name .. '.pps',math_ceil(values[2]),bucket_ts})
+                            graphite_channel:put({graphite_name .. '.fps',math_ceil(values[3]),bucket_ts})
 
-                                -- Add fields if missing for slow EWMA
-                                if #avg_values == 3 then
-                                    avg_values[4] = avg_values[1]
-                                    avg_values[5] = avg_values[2]
-                                    avg_values[6] = avg_values[3]
+                            if avg_bucket ~= nil then
+                                if avg_bucket.data[direction] == nil then
+                                    avg_bucket.data[direction] = {}
                                 end
 
+                                if avg_bucket.data[direction][stat_type] == nil then
+                                    avg_bucket.data[direction][stat_type] = {}
+                                end
 
-                                -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
-                                local fast_exp_value = math.exp(-bucket_length/average_calculation_period)
-                                local slow_exp_value = math.exp(-bucket_length/(average_calculation_period * 30))
+                                -- If stat isn't set then set it to start values
+                                if avg_bucket.data[direction][stat_type][stat] == nil then
+                                    values[4] = values[1]
+                                    values[5] = values[2]
+                                    values[6] = values[3]
+                                    avg_bucket.data[direction][stat_type][stat] = values
+                                else
+                                    local avg_values = avg_bucket.data[direction][stat_type][stat]
 
-                                -- Fast moving average, used for graphing
-                                avg_values[1] = values[1] + fast_exp_value * (avg_values[1] - values[1])
-                                avg_values[2] = values[2] + fast_exp_value * (avg_values[2] - values[2])
-                                avg_values[3] = values[3] + fast_exp_value * (avg_values[3] - values[3])
-
-                                -- Slow moving average, used for historical heuristic thresholding
-                                avg_values[4] = values[1] + slow_exp_value * (avg_values[4] - values[1])
-                                avg_values[5] = values[2] + slow_exp_value * (avg_values[5] - values[2])
-                                avg_values[6] = values[3] + slow_exp_value * (avg_values[6] - values[3])
-
-                                graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
-                                graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
-                                graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
-
-                                if thresholds[direction_str] and thresholds[direction_str][stat_type] and
-                                  thresholds[direction_str][stat_type][stat] then
-                                    local broken
-                                    local threshold_values = thresholds[direction_str][stat_type][stat]
-
-                                    for offset,metric in ipairs(metric_reverse) do
-                                        if threshold_values[metric] and threshold_values[metric].abs < avg_values[offset] then 
-                                            broken = add_broken_threshold(broken,direction_str,stat_type,stat,metric,avg_values[offset],threshold_values[metric].abs)
-                                        end
+                                    -- Add fields if missing for slow EWMA
+                                    if #avg_values == 3 then
+                                        avg_values[4] = avg_values[1]
+                                        avg_values[5] = avg_values[2]
+                                        avg_values[6] = avg_values[3]
                                     end
 
-                                    -- Perform heuristic thresholding based on historical moving average
-                                    if now - started > initial_delay then
+                                    -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
+                                    local fast_exp_value = math.exp(-bucket_length/average_calculation_period)
+                                    local slow_exp_value = math.exp(-bucket_length/(average_calculation_period * 30))
+
+                                    -- Fast moving average, used for graphing
+                                    avg_values[1] = values[1] + fast_exp_value * (avg_values[1] - values[1])
+                                    avg_values[2] = values[2] + fast_exp_value * (avg_values[2] - values[2])
+                                    avg_values[3] = values[3] + fast_exp_value * (avg_values[3] - values[3])
+
+                                    -- Slow moving average, used for historical heuristic thresholding
+                                    avg_values[4] = values[1] + slow_exp_value * (avg_values[4] - values[1])
+                                    avg_values[5] = values[2] + slow_exp_value * (avg_values[5] - values[2])
+                                    avg_values[6] = values[3] + slow_exp_value * (avg_values[6] - values[3])
+
+                                    graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
+                                    graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
+                                    graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
+
+                                    -- If thresholds for this stat type are configured
+                                    if thresholds[direction_str] and thresholds[direction_str][stat_type] and
+                                      thresholds[direction_str][stat_type][stat] then
+                                        local threshold_values = thresholds[direction_str][stat_type][stat]
+
+                                        -- Check if we've broken 'absolute' thresholds for each metric
                                         for offset,metric in ipairs(metric_reverse) do
-                                            local long_offset = 3 + offset
-                                            if threshold_values[metric] and threshold_values[metric].pct then
-                                                local threshold = (avg_values[long_offset] * (threshold_values[metric].pct / 100))
-                                                if avg_values[offset] > (avg_values[long_offset] * (threshold_values[metric].pct / 100)) then
-                                                    broken = add_broken_threshold(broken,direction_str,stat_type,stat,metric,avg_values[offset],threshold)
-                                                end
+                                            if threshold_values[metric] and threshold_values[metric].abs < avg_values[offset] then 
+                                                local broken = {
+                                                    metric    = metric,
+                                                    stat_type = stat_type,
+                                                    stat      = stat,
+                                                    value     = avg_values[offset],
+                                                    threshold = threshold_values[metric].abs,
+                                                    direction = direction,
+                                                }
+                                                alert_channel:put({broken,bucket_stats})
                                             end
                                         end
-                                    else
-                                        lp.dequeue('We dont have enough history for heuristic thresholding, using absolute thresholds only...',10)
-                                    end
 
-                                    -- If any of our thresholds have been broken, submit the broken results to our alerter.
-                                    if broken then
-                                        alert_channel:put(broken)
+                                        -- Perform heuristic thresholding based on historical moving average
+                                        if now - started > initial_delay then
+                                            for offset,metric in ipairs(metric_reverse) do
+                                                local long_offset = 3 + offset
+                                                if threshold_values[metric] and threshold_values[metric].pct then
+                                                    local threshold = (avg_values[long_offset] * (threshold_values[metric].pct / 100))
+                                                    if avg_values[offset] > (avg_values[long_offset] * (threshold_values[metric].pct / 100)) then
+                                                        local broken = {
+                                                            metric    = metric,
+                                                            stat_type = stat_type,
+                                                            stat      = stat,
+                                                            value     = avg_values[offset],
+                                                            threshold = threshold,
+                                                            direction = direction,
+                                                        }
+                                                        alert_channel:put({broken,bucket_stats})
+                                                    end
+                                                end
+                                            end
+                                        else
+                                            lp.dequeue('We dont have enough history for heuristic thresholding, using absolute thresholds only...',10)
+                                        end
                                     end
                                 end
                             end
@@ -990,7 +1179,6 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                 spc_buckets:replace(bucket2tuple(avg_bucket))
             end
         end
-
         fiber.sleep(0.1)
     end
 end
@@ -999,16 +1187,338 @@ local bucket_alerter = function(alert_channel)
     local self = fiber.self()
     self:name("ipfix/bucket-alerter")
 
+    local spc_buckets = box.space.buckets
     local spc_alerts = box.space.alerts
-    while 1 == 1 do
-        local alert = alert_channel:get()
+    local spc_alerts_by_hash = spc_alerts.index.by_hash
 
-        if alert then
+    local attack_protocol_ratio = config.attack_protocol_ratio
+
+    while 1 == 1 do
+        local alert_stats = alert_channel:get()
+
+        if alert_stats then
+            local new_alert, stats = unpack(alert_stats)
+            local now = math_ceil(fiber.time())
+
+            -- Set new_alert active
+            new_alert.active = true
+
+            -- Check to see if we currently have an active matching new_alert
+            -- If we do, increment the match counter
+            local new_alert_hash = {
+                new_alert.direction,
+                new_alert.stat_type,
+                new_alert.stat,
+                new_alert.metric,
+                1,
+            }
+
+            local alert = alert2table(spc_alerts_by_hash:get(new_alert_hash))
+
+            -- If alert is already active, then update it
+            if alert then
+                alert.duration = now - alert.start_ts
+                alert.value    = alert.value
+            -- Otherwise create new alert ready for dissection
+            else
+                alert                = new_alert
+                alert.start_ts       = now
+                alert.duration       = 0
+                alert.notified_start = false
+                alert.notified_end   = false
+                alert.details        = {}
+            end
+
+            alert.updated_ts = now
+
+            -- Get attack details from active stats
+            local stats_directed = stats[alert.direction]
+            local metric_num = metric[alert.metric]
+
+            -- Get total counter for this metric from bucket stats
+            local total_metric = stats_directed.global.global[metric_num]
+            local total_ratio  = attack_protocol_ratio * total_metric
+
+            alert.target = nil
+
+            -- Identify target
+            if alert.stat_type == 'subnet' then
+                alert.subnet = alert.stat
+
+                -- If this is against a subnet we can reduce the number of table lookups
+                -- We need to make instead of checking all IPs
+                -- We know the subnet so we use the ratio against the subnet traffic
+                -- Rather than globally
+                
+                local subnet_metric = stats_directed.subnet[alert.subnet][metric_num]
+                local subnet_ratio = attack_protocol_ratio * subnet_metric
+
+                log.info('Alert triggered on subnet ' .. alert.subnet)
+                local sub_lo,sub_high = ip.cidr_to_integer_range(alert.subnet)
+                for i=sub_lo, sub_high do
+                    local cur_ip = ip_addr_reverse[i]
+                    if stats_directed.ip[cur_ip] then
+                        local ip_stat = stats_directed.ip[cur_ip][metric_num]
+                        if ip_stat > subnet_ratio then
+                            alert.target = cur_ip
+                            log.info('Alert triggered on host ' .. alert.target)
+                        end
+                    end
+                end
+                 
+            -- If this is a single IP alert then we need to grab the subnet from the IP
+            elseif alert.stat_type == 'ip' then
+                alert.subnet = in_subnet(alert.stat)     
+                alert.target = alert.stat
+
+            -- If this was any other alert then we need to scan all known IP's to
+            -- look for the target
+            else
+                for i, cur_ip in ipairs(ip_addr_reverse) do
+                    if stats_directed.ip[cur_ip] then
+                        local ip_stat = stats_directed.ip[cur_ip][metric_num]
+                        if ip_stat > total_ratio then
+                            local ip_metric = stats_directed.ip[cur_ip][metric_num]
+                            alert.target = cur_ip
+                            alert.subnet = in_subnet(cur_ip)
+                        end
+                    end
+                end
+            end
+
+            local proto_stat_name     = 'protocol'
+            local tcp_flag_stat_name  = 'tcp_flag'
+            local icmp_type_stat_name = 'icmp_typecode'
+
+            -- Attempt to calculate ratios above which we know the type of traffic
+            -- dependent on the smallest aggregation (i.e. if we know attacked host, use that)
+            if alert.target then
+                local target        = alert.target
+                local metric_value  = stats_directed.ip[target][metric_num]
+                alert.match_ratio   = attack_protocol_ratio * metric_value
+                alert.match_metric  = metric_value
+                alert.match_type    = 'target'
+                proto_stat_name     = 'protocol_ip_'..target
+                tcp_flag_stat_name  = 'tcp_flag_ip_'..target
+                icmp_type_stat_name = 'icmp_typecode_ip_'..target
+
+            elseif alert.subnet then
+                local subnet        = alert.subnet
+                local metric_value  = stats_directed.subnet[subnet][metric_num]
+                alert.match_ratio   = attack_protocol_ratio * metric_value
+                alert.match_metric  = metric_value
+                alert.match_type    = 'subnet'
+                proto_stat_name     = 'protocol_subnet_'..subnet
+                tcp_flag_stat_name  = 'tcp_flag_subnet_'..subnet
+                icmp_type_stat_name = 'icmp_typecode_subnet_'..subnet
+
+            else
+                alert.match_ratio   = total_ratio
+                alert.match_metric  = total_metric
+                alert.match_type    = 'global'
+            end
+
+            alert.protocol_name = 'Unknown'
+
+            local details = alert.details
+
+            -- Calculate traffic profile
+            for _, cur_proto in ipairs(proto_iter) do
+                local proto_name, proto_num = unpack(cur_proto)
+
+                if stats_directed[proto_stat_name][proto_name] then
+                    local proto_stat = stats_directed[proto_stat_name][proto_name][metric_num]
+                    if proto_stat > alert.match_ratio then
+                        alert.details.protocol   = proto_num
+                        alert.protocol_name      = proto_name:upper()
+                        alert.protocol_certainty = ((proto_stat / alert.match_metric) * 100)
+                    end
+                end
+            end
+
+            if alert.protocol and alert.protocol == proto.TCP then
+                log.info('TCP attack detected, narrowing down TCP flags...')
+                local match_metric = alert.match_metric
+                local match_ratio  = attack_protocol_ratio * match_metric
+
+                for _, cur_flag in ipairs(tcp_flags_iter) do
+                    local flag_name, flag_num = unpack(cur_flag)
+                    if stats_directed[tcp_flag_stat_name][flag_name] then
+                        local tcp_flag_stat = stats_directed[tcp_flag_stat_name][flag_name][metric_num]
+                        -- This is a TCP attack - if more than match_ratio TCP traffic
+                        -- matches a specific flag, then this is a TCP flag based attack
+                        if tcp_flag_stat > match_ratio then
+                            alert.details.tcp_flag   = flag_num
+                            alert.protocol_certainty = ((tcp_flag_stat / match_metric) * 100)
+                            alert.protocol_name      = table.concat({alert.protocol_name,flag_name},' ')
+                        end
+                    end
+                end 
+            elseif alert.protocol and alert.protocol == proto.ICMP then
+                -- We dont have reverse records for ICMP since it can be a multidimensional table
+                -- Iterate over the ICMP info for this bucket instead, this is probably quick enough
+                local icmp_table = stats_directed[icmp_type_stat_name]
+                for icmp_name, icmp_stats in pairs(icmp_table) do
+                    local icmp_stat = icmp_stats[metric_num]
+                    if icmp_stat > alert.match_ratio then
+                        alert.details.icmp_type_name = icmp_name
+                        alert.protocol_name  = table.concat({alert.protocol_name,icmp_name},' ')
+                        alert.protocol_certainty = ((icmp_stat / alert.match_metric) * 100)
+                    end
+                end 
+            end
+
+
+
+            if not details.peak_global then
+                details.peak_global_inbound  = {0,0,0}
+                details.peak_global_outbound = {0,0,0}
+                details.peak_global_unknown  = {0,0,0}
+            end
+
+            -- Track global traffic rates for duration of alert
+            for offset,metric in ipairs(metric_reverse) do
+                for dir_num,dir_name in ipairs(direction_reverse) do
+                    local peak_name = 'peak_global_'..dir_name
+                    if stats[dir_num].global then
+                        local value = stats[dir_num].global.global[offset]
+                        if value > details[peak_name][offset] then
+                            details[peak_name][offset] = value
+                        end
+                        details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
+                    else
+                        details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(0,offset)
+                    end
+                end
+            end
+
+            if not details.peak_target then
+                details.peak_target_inbound  = {0,0,0}
+                details.peak_target_outbound = {0,0,0}
+                details.peak_target_unknown  = {0,0,0}
+            end
+
+            -- Track target traffic rates for duration of alert
+            if alert.target ~= nil or alert.subnet ~= nil then
+                for dir_num,dir_name in ipairs(direction_reverse) do
+                    local peak_name = 'peak_target_'..dir_name
+                    local target_stats
+                    if alert.target ~= nil then
+                        if stats[dir_num].ip then
+                            target_stats = stats[dir_num].ip[alert.target]
+                        end
+                    elseif alert.subnet ~= nil then
+                        if stats[dir_num].subnet then
+                            target_stats = stats[dir_num].subnet[alert.subnet]
+                        end
+                    end
+
+                    for offset,metric in ipairs(metric_reverse) do
+                        if target_stats then
+                            local value = target_stats[offset]
+                            
+                            if value > details[peak_name][offset] then
+                                details[peak_name][offset] = value
+                            end
+                            details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
+                        else
+                            details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(0,offset) 
+                        end
+                    end
+                end
+            end
+
+            if not details.protocol_name then
+                details.protocol_name = {}
+            end
+
+            -- Attempt to get current averages
+            local avg_bucket = bucket2table(spc_buckets:get{0})
+
+            if avg_bucket then
+                local avg_directed = avg_bucket.data[alert.direction] 
+                local avg_stats, global_stats
+
+                if avg_directed then
+                    global_stats = avg_directed.global.global
+                    if alert.target ~= nil then
+                        if alert.details.protocol ~= nil then
+                            local metric = proto_reverse[alert.details.protocol]
+                            avg_stats = avg_directed['protocol_ip_'..alert.target][metric]
+                        else
+                            avg_stats = avg_directed.ip[alert.target]
+                        end
+                    elseif alert.subnet ~= nil then
+                        if alert.details.protocol ~= nil then
+                            local metric = proto_reverse[alert.details.protocol]
+                            avg_stats = avg_directed['protocol_subnet_'..alert.subnet][metric]
+                        else
+                            avg_stats = avg_directed.subnet[alert.subnet]
+                        end
+                    end
+                else
+                    log.info('Couldnt find average stats for direction ' .. direction_name(alert.direction))
+                end
+
+                for offset,metric in ipairs(metric_reverse) do
+                    if avg_stats then
+                        local value = avg_stats[offset]
+                        details['avg_directed_' .. metric .. '_pretty'] = pretty_value(value,offset)
+                        details['total_directed_' .. metric .. '_pretty'] = pretty_value(value * alert.duration,metric_totals[metric])
+                    else
+                        details['avg_directed_' .. metric .. '_pretty'] = pretty_value(0,offset)
+                        details['total_directed_' .. metric .. '_pretty'] = pretty_value(0,offset) 
+                    end
+
+                    if global_stats then
+                        local value = global_stats[offset]
+                        details['avg_global_' .. metric .. '_pretty'] = pretty_value(value,offset)
+                    else
+                        details['avg_global_' .. metric .. '_pretty'] = pretty_value(0,offset) 
+                    end
+                end
+            end
+
+            alert.direction_name              = direction_name(alert.direction)
+            details.duration_pretty           = pretty_duration(alert.duration)
+            details.subnet_pretty             = alert.subnet
+            details.direction_name_pretty     = uc_first(alert.direction_name)
+            details.start_time_pretty         = os.date("!%a, %d %b %Y %X GMT",alert.start_ts)
+            details.metric_pretty             = alert.metric:upper()
+            details.value_pretty              = pretty_value(alert.value,metric_num)
+            details.threshold_pretty          = pretty_value(alert.threshold,metric_num)
+            details.protocol_certainty_pretty = string.format('(%.1f%%)',alert.protocol_certainty or 0)
+            details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
+            details.protocol_name_pretty      = table.concat(dedup_keys(details.protocol_name,true),', ')
+            -- Only use this when event expires, this is the *last* time we saw the anomaly
+            details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
+
+
+            if not alert.target then
+                alert.target = nil
+            else
+                if details.target == nil then
+                    details.target = {}
+                end
+                details.target[alert.target] = true
+                details.target_pretty = table.concat(dedup_keys(details.target),', ')
+            end
+
+            alert.details = details
+            alert.details.attack_details = format_alert_details(alert)
+
+            if not alert.notified_start then
+                if events.trigger('alert_active',alert.duration,alert.details) then
+                    alert.notified_start = true
+                end
+            end
+
             rPrint(alert)
+            -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, {Updated Timestamp}
+            local added_alert = spc_alerts:replace(alert2tuple(alert))
         end
         fiber.sleep(0.1)
     end
-
 end
 
 local graphite_submitter = function(graphite_channel)
@@ -1151,6 +1661,14 @@ local start_http_server = function()
         local response = fiber.info()
         return self:render{ json = response }
     end)
+
+    server:route({ path = '/alerts' }, function(self)
+        local out = {}
+        for _,alert in box.space.alerts:pairs{} do
+            table.insert(out,alert2table(alert))
+        end
+        return self:render{ json = out }
+    end)
     
     server:route({ path = '/buckets', method='GET' }, function(self)
         local stat = self:stash('stat')
@@ -1188,6 +1706,6 @@ bootstrap_db()
 setup_user()
 setup_db()
 load_ipfix()
-start_fibers()
+fiber.create(start_fibers)
 start_http_server()
 

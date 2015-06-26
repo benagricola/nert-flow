@@ -40,9 +40,18 @@ function _M.num_to_octets(num)
     return table_concat(octets,".")
 end
 
-function _M.integer_range_to_cidr(sub_lo,sub_hi)
+function _M.integer_range_to_cidr(sub_lo,sub_hi,with_subnet)
+    if type(sub_hi) == 'boolean' then
+        with_subnet = sub_hi
+        sub_hi = sub_lo
+    end
+
     -- Get size of subnet
     local size = sub_hi - sub_lo
+
+    if with_subnet == nil then
+        with_subnet = true
+    end
 
     start_ip = _M.num_to_octets(sub_lo)
 
@@ -58,7 +67,11 @@ function _M.integer_range_to_cidr(sub_lo,sub_hi)
     else
         slash = (32 - math_ceil(math_log(size)/math_log(2)))
     end
-    return start_ip .. '/' .. slash 
+    if with_subnet then
+        return start_ip .. '/' .. slash
+    else
+        return start_ip
+    end
 end
 
 function _M.cidr_to_integer_range(cidr)
