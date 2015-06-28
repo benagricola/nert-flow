@@ -42,6 +42,15 @@
           endpoint: *hipchat_sysadmins
           color:    'red'
           message:  '<strong>Traffic Anomaly Detected</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
+    on_new_protocol_alert:
+      events:
+        alert_new_protocol:
+          delay: 0
+      actions:
+        hipchat:
+          endpoint: *hipchat_sysadmins
+          color:    'purple'
+          message:  '<strong>Traffic Anomaly Changed Protocol</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
     on_inactive_alert:
       events:
         alert_inactive: {}

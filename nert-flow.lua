@@ -1517,7 +1517,15 @@ local bucket_alerter = function(alert_channel)
             details.value_pretty              = pretty_value(alert.value,metric_num)
             details.threshold_pretty          = pretty_value(alert.threshold,metric_num)
             details.protocol_certainty_pretty = string.format('(%.1f%%)',alert.protocol_certainty or 0)
-            details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
+
+            local new_protocol = false
+
+            -- Check if this is a new protocol
+            if not details.protocol_name[alert.protocol_name] then
+                details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
+                new_protocol = true
+            end
+
             details.protocol_name_pretty      = table.concat(dedup_keys(details.protocol_name,true),', ')
             -- Only use this when event expires, this is the *last* time we saw the anomaly
             details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
@@ -1542,6 +1550,8 @@ local bucket_alerter = function(alert_channel)
                 if events.trigger('alert_active',alert.duration,alert.details) then
                     alert.notified_start = true
                 end
+            elseif new_protocol then
+                events.trigger('alert_new_protocol',alert.duration,alert.details)
             end
 
             -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, {Updated Timestamp}
@@ -1571,7 +1581,7 @@ local graphite_submitter = function(graphite_channel)
     local graphite = socket('AF_INET', 'SOCK_DGRAM', 'udp')
 
     while 1 == 1 do
-        local to_submit = graphite_channel:get()
+        local to_submit = graphite_channel:get(1.0)
         if to_submit ~= nil then
             pending = pending + 1
             output = output .. table.concat(to_submit,' ') .. "\n"
@@ -1584,7 +1594,7 @@ local graphite_submitter = function(graphite_channel)
             end
             pending = 0
             output  = ''
-            fiber.sleep(0.01)
+            fiber.sleep(0.001)
         end
     end
     graphite:close()
