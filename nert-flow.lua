@@ -174,15 +174,17 @@ local ip_addr_iter        = {}
 
 
 local tcp_flags_name = function(tcp_flags_num)
+    if not tcp_flags_reverse[tcp_flags_num] then
+        log.error('Unidentified TCP flag: ' .. tcp_flags_num)
+    end
     return tcp_flags_reverse[tcp_flags_num] or 'unknown'
 end
 
 local proto_name = function(proto_num)
-    return proto_reverse[proto_num] or 'Other'
-end
-
-local direction_name = function(direction_num) 
-    return direction_reverse[direction_num] or 'unknown'
+    if not proto_reverse[proto_num] then
+        log.error('Unidentified protocol number: ' .. proto_num)
+    end
+    return proto_reverse[proto_num] or 'other'
 end
 
 local direction_name = function(direction_num) 
@@ -190,6 +192,9 @@ local direction_name = function(direction_num)
 end
 
 local flow_status_name = function(flow_status_num) 
+    if not flow_status_reverse[flow_status_num] then
+        log.error('Unidentified flow status: ' .. flow_status_num)
+    end
     return flow_status_reverse[flow_status_num] or 'unknown'
 end
 
@@ -534,14 +539,14 @@ local format_alert_details = function(alert)
     },'\n')
     if alert.details.target_pretty then
         pretty_format_str = table.concat({"IP: %(target_pretty)",pretty_format_str},'\n')
-        pretty_format_str = table.concat({
-            pretty_format_str,
-            "Peak Target Traffic IN:      %(target_inbound_bps_pretty) / %(target_inbound_pps_pretty) / %(target_inbound_fps_pretty)",
-            "Peak Target Traffic OUT:     %(target_outbound_bps_pretty) / %(target_outbound_pps_pretty) / %(target_outbound_fps_pretty)",
-            "Avg Target Attack Traffic:   %(avg_directed_bps_pretty) / %(avg_directed_pps_pretty) / %(avg_directed_fps_pretty)",
-            "Total Target Attack Traffic: %(total_directed_bps_pretty) / %(total_directed_pps_pretty) / %(total_directed_fps_pretty)",
-        },'\n')
     end
+    pretty_format_str = table.concat({
+        pretty_format_str,
+        "Peak Target Traffic IN:      %(target_inbound_bps_pretty) / %(target_inbound_pps_pretty) / %(target_inbound_fps_pretty)",
+        "Peak Target Traffic OUT:     %(target_outbound_bps_pretty) / %(target_outbound_pps_pretty) / %(target_outbound_fps_pretty)",
+        "Avg Target Attack Traffic:   %(avg_directed_bps_pretty) / %(avg_directed_pps_pretty) / %(avg_directed_fps_pretty)",
+        "Total Target Attack Traffic: %(total_directed_bps_pretty) / %(total_directed_pps_pretty) / %(total_directed_fps_pretty)",
+    },'\n')
     return pretty_format_str % alert.details
 end
 
@@ -811,7 +816,6 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 
         local res = ipfix_channel:get()
 
-        
         -- If we have a flow
         if res then
             local fields = res
