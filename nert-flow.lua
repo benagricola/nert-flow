@@ -823,7 +823,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 flow_start = fields[flowStartMilliseconds].value
                 flow_end   = fields[flowEndMilliseconds].value
             else
-                lp.dequeue("Flow packet with no identifiable flow start / end",5)
+                lp.dequeue("Flow packet with no identifiable flow start / end - may be options template!",5)
             end
 
             -- if flow has valid start and end time
@@ -1118,7 +1118,7 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                 if avg_bucket.data[direction][stat_type][stat] == nil then
                                     avg_bucket.data[direction][stat_type][stat] = values
                                 else
-                                    local avg_values = avg_bucket.data[direction][stat_type][stat]
+                                    local avg_values = get_value_mt(avg_bucket.data[direction][stat_type][stat])
 
                                     -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
                                     local fast_exp_value = math.exp(-bucket_length/average_calculation_period)
