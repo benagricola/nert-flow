@@ -1,6 +1,7 @@
 local binutil = require("binutil")
 local lp      = require("logprint")
 local log     = require("log")
+local os_date = require("os").date
 local u8   = binutil.u8
 local u16  = binutil.u16
 local u32  = binutil.u32
@@ -58,6 +59,7 @@ function rPrint(s, l, i) -- recursive Print (structure, limit, indent)
     end
     return l
 end
+
 function _M.configure(config,elements)
     _M.config = config
     _M.elements = elements
@@ -66,7 +68,7 @@ end
 function _M.load_templates(cache_file)
     local f,err = io.open(cache_file, "r")
     if not f then
-        print(err)
+        log.error(err)
         return
     end
     templates = json.decode(f:read("*all"))
@@ -81,7 +83,7 @@ end
 function _M.save_templates(cache_file)
     local f,err = io.open(cache_file, "w")
     if not f then
-        print(err)
+        log.error(err)
         return
     end
     f:write(json.encode(_M.templates))
@@ -102,7 +104,7 @@ function _M.parse_header(packet)
         ver   = u16(packet,1),
         len   = u16(packet,3),
         ts    = u32(packet,5),
-        hrts  = os.date("%c", ts),
+        hrts  = os_date("%c", ts),
         seq   = u32(packet,9),
         domid = u32(packet,13),
     }
@@ -204,7 +206,7 @@ function _M.parse_set(packet)
         if not _M.templates then
             lp.dequeue("No templates identified, skipping...",5)
         else
-            _M.templates[set.tpl_id] = set
+            _M.templates[tostring(set.tpl_id)] = set
         end
 
     elseif set.id == 3 then -- If this is an options template, ignore for the moment
@@ -225,7 +227,7 @@ function _M.parse_set(packet)
         if not _M.templates then
             lp.dequeue("No templates identified, skipping...",5)
         else
-            _M.templates[set.tpl_id] = set
+            _M.templates[tostring(set.tpl_id)] = set
         end
 
     elseif set.id >= 4 and set.id <= 255 then
