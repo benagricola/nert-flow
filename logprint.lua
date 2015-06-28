@@ -3,6 +3,8 @@ local fiber = require("fiber")
 local _M = { messages = {} }
 
 function _M.dequeue(message,interval)
+    interval = interval or 5
+
     if not _M.messages[message] then
         _M.messages[message] = fiber.time()
         log.info(message)

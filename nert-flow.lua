@@ -781,7 +781,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
         -- Reset bucket if we're switching to a new one
         if bucket_time ~= last_bucket_time then
             if not aggregate_channel:put({last_bucket_time,bucket},config.fiber_channel_timeout) then
-                lp.dequeue('Error submitting bucket data to fiber channel, data lost!')
+                lp.dequeue('Error submitting bucket data to fiber channel, data lost!',5)
             end
             -- Reset bucket for directions
             bucket = { {}, {}, {} }
