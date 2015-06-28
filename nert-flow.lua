@@ -65,13 +65,18 @@ local tcp_flags = {
 }
 
 local proto = {
-    ICMP = 1,
-    TCP  = 6,
-    UDP  = 17,
-    GRE  = 47,
-    ESP  = 50,
-    AH   = 51,
-    SCTP = 132,
+    ICMP  = 1,
+    IGMP  = 2,
+    IPV4  = 4,
+    TCP   = 6,
+    UDP   = 17,
+    GRE   = 47,
+    ESP   = 50,
+    AH    = 51,
+    EIGRP = 88,
+    OSPF  = 89,
+    ISIS  = 124,
+    SCTP  = 132,
 }
 
 local direction = {
