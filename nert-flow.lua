@@ -1406,8 +1406,6 @@ local bucket_alerter = function(alert_channel)
                 end 
             end
 
-
-
             if not details.peak_global then
                 details.peak_global_inbound  = get_value_mt()
                 details.peak_global_outbound = get_value_mt()
@@ -1608,11 +1606,6 @@ local graphite_submitter = function(graphite_channel)
         end
     end
     graphite:close()
-end
-
-local listener_ports = {}
-
-local start_ipfix_listener = function(port,channel)
 end
 
 local ipfix_background_saver = function()
