@@ -1522,9 +1522,10 @@ local bucket_alerter = function(alert_channel)
 
             -- Check if this is a new protocol
             if not details.protocol_name[alert.protocol_name] then
-                details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
                 new_protocol = true
             end
+
+            details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
 
             details.protocol_name_pretty      = table.concat(dedup_keys(details.protocol_name,true),', ')
             -- Only use this when event expires, this is the *last* time we saw the anomaly
