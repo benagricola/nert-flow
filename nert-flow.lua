@@ -731,7 +731,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
         return flags
     end
 
-    local status_active     = 1
+    local status_active            = 1
 
     local spc_flows                = box.space.flows
 
@@ -771,21 +771,24 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
         if not store[typ] then
             store[typ] = {}
         end
+
         -- If stat is a table then someone omitted the stat variable
         -- Assume stat = typ and values = stat
         if type(stat) == 'table' then
             values = stat
-            stat = typ
+            stat   = typ
         end
             
-            
-        if not store[typ][stat] then
-            store[typ][stat] = get_value_mt()
+        local storage = store[typ][stat]
+        if not storage then
+            storage = get_value_mt()
         end
 
         for key, value in ipairs(values) do
-            store[typ][stat][key] = store[typ][stat][key] + value
+            storage[key] = storage[key] + value
         end
+
+        store[typ][stat] = storage
     end
 
     local packets, bits, flows = 0,0,0
