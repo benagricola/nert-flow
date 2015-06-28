@@ -895,8 +895,8 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 -- Make sure flow duration is never zero
                 -- Flows can be 0 length if they are a single UDP packet
                 -- In this case, just take the values as-is.
-                if flow_duration < 0.5 then
-                    flow_duration = 0.5
+                if flow_duration < 1 then
+                    flow_duration = 1
                     observed_pps = deltaPackets / bucket_length
                     observed_bps = (deltaBytes * 8) / bucket_length
                 else
