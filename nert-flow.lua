@@ -1072,14 +1072,19 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
             for direction, stat_types in ipairs(bucket_stats) do
                 -- For each type
                 for stat_type, stats in pairs(stat_types) do
-                    -- We only care about certain stat types for averaging
-                    -- if stat_type == 'global' 
-                    --     or stat_type == 'ip' 
-                    --     or stat_type == 'subnet' 
-                    --     or stat_type == 'protocol'
-                    --     or stat_type == 'port'
-                    --     or stat_type == 'tcp_flag'
-                    --     or stat_type == 'icmp_typecode' then
+                    local submit_to_graphite = false
+
+                    -- Only submit to graphite for specific stat types
+                    if stat_type == 'global' 
+                        or stat_type == 'ip' 
+                        or stat_type == 'subnet' 
+                        or stat_type == 'protocol'
+                        or stat_type == 'port'
+                        or stat_type == 'tcp_flag'
+                        or stat_type == 'icmp_typecode' then
+                        submit_to_graphite = true
+                    end
+
                     if true then
                         for stat, values in pairs(stats) do
 
@@ -1095,6 +1100,7 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
 
                             local direction_str = direction_name(direction)
                             -- Submit statistic to graphite
+                        
                             local graphite_name = table.concat({
                                 'flow',
                                 stat_type:lower(),
@@ -1102,11 +1108,13 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                 direction_str,
                             },'.'):gsub('%.%.','.')
 
-                            -- We don't need ridiculous decimal precision here and the numbers are large
-                            -- So lets just ceil the values instead of doing some ridiculous accurate rounding
-                            graphite_channel:put({graphite_name .. '.bps',math_ceil(values[1]),bucket_ts})
-                            graphite_channel:put({graphite_name .. '.pps',math_ceil(values[2]),bucket_ts})
-                            graphite_channel:put({graphite_name .. '.fps',math_ceil(values[3]),bucket_ts})
+                            if submit_to_graphite then
+                                -- We don't need ridiculous decimal precision here and the numbers are large
+                                -- So lets just ceil the values instead of doing some ridiculous accurate rounding
+                                graphite_channel:put({graphite_name .. '.bps',math_ceil(values[1]),bucket_ts})
+                                graphite_channel:put({graphite_name .. '.pps',math_ceil(values[2]),bucket_ts})
+                                graphite_channel:put({graphite_name .. '.fps',math_ceil(values[3]),bucket_ts})
+                            end
 
                             if avg_bucket ~= nil then
                                 if avg_bucket.data[direction] == nil then
@@ -1137,9 +1145,11 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                     avg_values[5] = values[2] + slow_exp_value * (avg_values[5] - values[2])
                                     avg_values[6] = values[3] + slow_exp_value * (avg_values[6] - values[3])
 
-                                    graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
-                                    graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
-                                    graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
+                                    if submit_to_graphite then
+                                        graphite_channel:put({graphite_name .. '.avg_bps',math_ceil(avg_values[1]),bucket_ts})
+                                        graphite_channel:put({graphite_name .. '.avg_pps',math_ceil(avg_values[2]),bucket_ts})
+                                        graphite_channel:put({graphite_name .. '.avg_fps',math_ceil(avg_values[3]),bucket_ts})
+                                    end
 
                                     -- If thresholds for this stat type are configured
                                     if thresholds[direction_str] and thresholds[direction_str][stat_type] and
