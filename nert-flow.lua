@@ -292,6 +292,7 @@ local bootstrap_db = function()
         work_dir = config.work_dir or "./data",
         snapshot_period = 300,
         snapshot_count  = 5,
+        custom_proc_title = 'NeRT Flow'
     })
 end
 
