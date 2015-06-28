@@ -288,10 +288,10 @@ end
 
 local bootstrap_db = function()
     box.cfg({
-        listen = config.db_port or 3301,
-        work_dir = config.work_dir or "./data",
-        snapshot_period = 300,
-        snapshot_count  = 5,
+        listen            = config.db_port or 3301,
+        work_dir          = config.work_dir or "./data",
+        snapshot_period   = 300,
+        snapshot_count    = 5,
         custom_proc_title = 'NeRT Flow'
     })
 end
@@ -673,6 +673,26 @@ local ipfix_listener = function(port,channel)
     end
 end
 
+local get_value_mt = function(tab)
+    if not tab then
+        tab = {}
+    end
+    setmetatable(tab, { __index = function(table,key)
+        -- IDX 1-3 = Normal values + short averages
+        -- IDX 4-6 = Long averages
+        -- If index is > 3 then the default value is table[idx - 3] if set
+        -- Otherwise the default value is 0
+        if key > 3 then
+            local def = table[key-3]
+            if def then
+                return def
+            end
+        end
+        return 0 
+    end })
+
+    return tab
+end
 
 local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     -- Set fiber listener name
@@ -760,16 +780,11 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
             
             
         if not store[typ][stat] then
-            store[typ][stat] = {}
-            setmetatable(store[typ][stat], { __index = function() return 0 end })
+            store[typ][stat] = get_value_mt()
         end
 
         for key, value in ipairs(values) do
-            if store[typ][stat][key] == nil then
-                store[typ][stat][key] = value
-            else
-                store[typ][stat][key] = store[typ][stat][key] + value
-            end
+            store[typ][stat][key] = store[typ][stat][key] + value
         end
     end
 
@@ -929,7 +944,6 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 --end
 
                 -- We cheat and just put flows into 'now' slot
-
                 local bucket_dir = bucket[flow_dir]
 
                 -- Global PPS / BPS / FPS
@@ -1065,6 +1079,10 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                     --     or stat_type == 'icmp_typecode' then
                     if true then
                         for stat, values in pairs(stats) do
+
+                            -- Set values metatable since this is not 'transmitted' in fiber ipc channels
+                            local values = get_value_mt(values)
+
                             local sanitized_stat_name = tostring(stat):lower():gsub('/','_'):gsub('%.','_')
 
                             -- If these are equal then the graphite path would be stat_type.stat_type which we dont want
@@ -1098,19 +1116,9 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
 
                                 -- If stat isn't set then set it to start values
                                 if avg_bucket.data[direction][stat_type][stat] == nil then
-                                    values[4] = values[1]
-                                    values[5] = values[2]
-                                    values[6] = values[3]
                                     avg_bucket.data[direction][stat_type][stat] = values
                                 else
                                     local avg_values = avg_bucket.data[direction][stat_type][stat]
-
-                                    -- Add fields if missing for slow EWMA
-                                    if #avg_values == 3 then
-                                        avg_values[4] = avg_values[1]
-                                        avg_values[5] = avg_values[2]
-                                        avg_values[6] = avg_values[3]
-                                    end
 
                                     -- Calculate exponential moving average (http://en.wikipedia.org/wiki/Moving_average#Application_to_measuring_computer_performance) 
                                     local fast_exp_value = math.exp(-bucket_length/average_calculation_period)
@@ -1328,6 +1336,8 @@ local bucket_alerter = function(alert_channel)
 
             local details = alert.details
 
+            -- TODO: Clean all of this Up, must be less verbose way of doing this
+
             -- Calculate traffic profile
             for _, cur_proto in ipairs(proto_iter) do
                 local proto_name, proto_num = unpack(cur_proto)
@@ -1377,9 +1387,9 @@ local bucket_alerter = function(alert_channel)
 
 
             if not details.peak_global then
-                details.peak_global_inbound  = {0,0,0}
-                details.peak_global_outbound = {0,0,0}
-                details.peak_global_unknown  = {0,0,0}
+                details.peak_global_inbound  = get_value_mt()
+                details.peak_global_outbound = get_value_mt()
+                details.peak_global_unknown  = get_value_mt()
             end
 
             -- Track global traffic rates for duration of alert
@@ -1399,9 +1409,9 @@ local bucket_alerter = function(alert_channel)
             end
 
             if not details.peak_target then
-                details.peak_target_inbound  = {0,0,0}
-                details.peak_target_outbound = {0,0,0}
-                details.peak_target_unknown  = {0,0,0}
+                details.peak_target_inbound  = get_value_mt()
+                details.peak_target_outbound = get_value_mt()
+                details.peak_target_unknown  = get_value_mt()
             end
 
             -- Track target traffic rates for duration of alert
@@ -1500,6 +1510,8 @@ local bucket_alerter = function(alert_channel)
             details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
 
 
+            -- ENDTODO: Clean all of this Up, must be less verbose way of doing this
+            
             if not alert.target then
                 alert.target = nil
             else
