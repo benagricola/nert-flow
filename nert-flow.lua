@@ -1432,8 +1432,8 @@ local bucket_alerter = function(alert_channel)
                         local value = stats[dir_num].global.global[offset]
                         if value > details[peak_name][offset] then
                             details[peak_name][offset] = value
+                            details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
                         end
-                        details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
                     else
                         details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(0,offset)
                     end
@@ -1467,8 +1467,8 @@ local bucket_alerter = function(alert_channel)
                             
                             if value > details[peak_name][offset] then
                                 details[peak_name][offset] = value
+                                details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
                             end
-                            details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
                         else
                             details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(0,offset) 
                         end
