@@ -405,7 +405,7 @@ local pretty_value = function(value,typ)
             unit    = 'K'..end_unit
             divider = 1000
         end
-
+    end
     return string.format('%.2f %s', value / divider, unit)
 end
 
