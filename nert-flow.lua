@@ -362,32 +362,51 @@ local pretty_duration = function(duration)
 end
 
 local pretty_value = function(value,typ)
-    if typ == metric.bps then
-        -- Display in Mbit
-        return string.format('%.2f Mbps', value / 1048576)
-    end
-    if typ == metric.pps then
-        -- Display in Kpps
-        return string.format('%.2f Kpps', value / 1000)
-    end
-    if typ == metric.fps then
-        -- Display in Kfps
-        return string.format('%.2f Kfps', value / 1000)
-    end
-    if typ == metric_totals.bps then
-        -- Display in Gbytes
-        return string.format('%.2f Gbytes', value / 1073741824)
-    end
-    if typ == metric_totals.pps then
-        -- Display in Million packets 
-        return string.format('%.2f Mpackets', value / 1048576)
-    end
-    if typ == metric_totals.fps then
-        -- Display in Million flows
-        return string.format('%.2f Mflows', value / 1048576)
-    end
+    local unit, divider
+    -- 1024
+    if typ == metric.bps or typ == metric_totals.bps then
+        local end_unit
+        if typ == metric.bps then
+           end_unit = 'bps'
+        else
+            end_unit = 'bytes'
+        end
+        if value > 1073741824 then
+            unit    = 'G'..end_unit
+            divider = 1073741824
+        elseif value > 1048576 then
+            unit    = 'M'..end_unit
+            divider = 1048576
+        elseif value > 1024 then
+            unit    = 'K'..end_unit
+            divider = 1024
+        end
+    -- 1000
+    elseif typ == metric.pps or typ == metric.fps 
+      or typ == metric_totals.pps or typ == metric_totals.fps then
+        local end_unit
+        if typ == metric.pps then
+            end_unit = 'pps'
+        elseif typ == metric.fps then
+            end_unit = 'fps'
+        elseif typ == metric_totals.pps then
+            end_unit = 'packets'
+        elseif typ == metric_totals.fps then
+            end_unit = 'flows'
+        end
 
-    return tostring(value)
+        if value > 1000000000 then
+            unit    = 'G'..end_unit
+            divider = 1000000000
+        elseif value > 1000000 then
+            unit    = 'M'..end_unit
+            divider = 1000000
+        elseif value > 1000 then
+            unit    = 'K'..end_unit
+            divider = 1000
+        end
+
+    return string.format('%.2f %s', value / divider, unit)
 end
 
 local uc_first = function(str)
