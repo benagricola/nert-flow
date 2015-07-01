@@ -367,7 +367,7 @@ local pretty_value = function(value,typ)
     if typ == metric.bps or typ == metric_totals.bps then
         local end_unit
         if typ == metric.bps then
-           end_unit = 'bps'
+            end_unit = 'bps'
         else
             end_unit = 'bytes'
         end
@@ -380,6 +380,9 @@ local pretty_value = function(value,typ)
         elseif value > 1024 then
             unit    = 'K'..end_unit
             divider = 1024
+        else
+            unit    = end_unit
+            divider = 1
         end
     -- 1000
     elseif typ == metric.pps or typ == metric.fps 
@@ -404,6 +407,9 @@ local pretty_value = function(value,typ)
         elseif value > 1000 then
             unit    = 'K'..end_unit
             divider = 1000
+        else
+            unit    = end_unit
+            divider = 1
         end
     end
     return string.format('%.2f %s', value / divider, unit)
