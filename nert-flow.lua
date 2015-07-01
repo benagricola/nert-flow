@@ -14,6 +14,8 @@ local math_ceil   = math.ceil
 local math_floor  = math.floor
 local lp          = require("logprint")
 
+local digest      = require("digest")
+
 local expirationd = require("expirationd")
 local bit_band    = bit.band
 local bit_rshift  = bit.rshift
@@ -312,6 +314,15 @@ local setup_user = function()
         box.schema.user.grant('guest','read,write,execute','universe')
     end
 end
+
+local get_consistent = function(hash_fields,buckets)
+    local base_hash = digest.crc32(table.concat(hash_fields) .. fiber.time())
+
+    local selected_bucket = digest.guava(base_hash,#buckets)
+
+    return buckets[selected_bucket]
+end
+
 
 local in_subnet = function(subnet)
     local subnets = config.integer_subnets
@@ -632,6 +643,7 @@ local ipfix_listener = function(port,channel)
 
     -- Bind to configured ports
     local sock = socket('AF_INET','SOCK_DGRAM', 'udp')
+    sock:setsockopt(proto.UDP,'SO_REUSEADDR',true)
     sock:bind("0.0.0.0",port)
 
     -- Set fiber listener name
@@ -1538,6 +1550,17 @@ local bucket_alerter = function(alert_channel)
             -- Only use this when event expires, this is the *last* time we saw the anomaly
             details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
 
+
+            -- Name this alert for easier visibility
+            if not details.name_pretty then
+                details.name_pretty = get_consistent({
+                    alert.direction,
+                    alert.stat_type,
+                    alert.stat,
+                    alert.metric,
+                    alert.start_ts,
+                },config.alert_names)
+            end
 
             -- ENDTODO: Clean all of this Up, must be less verbose way of doing this
             

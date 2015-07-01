@@ -41,7 +41,7 @@
         hipchat:
           endpoint: *hipchat_sysadmins
           color:    'red'
-          message:  '<strong>Traffic Anomaly Detected</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
+          message:  "<strong>Traffic Anomaly '%(name_pretty)' Detected</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>"
     on_new_protocol_alert:
       events:
         alert_new_protocol:
@@ -50,15 +50,17 @@
         hipchat:
           endpoint: *hipchat_sysadmins
           color:    'purple'
-          message:  '<strong>Traffic Anomaly Changed Protocol</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
+          message:  "<strong>Traffic Anomaly '%(name_pretty)' Protocol Changed</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>"
     on_inactive_alert:
       events:
-        alert_inactive: {}
+        alert_inactive:
+          # Only fire this event after 30 seconds
+          delay: 0 
       actions:
         hipchat:
           endpoint: *hipchat_sysadmins
           color:    'green'
-          message:  '<strong>Traffic Anomaly Expired</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Expired:</strong> %(end_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>'
+          message:  "<strong>Traffic Anomaly '%(name_pretty)' Expired</strong><br /><p><strong>Started:</strong> %(start_time_pretty)</p><p><strong>Expired:</strong> %(end_time_pretty)</p><p><strong>Direction:</strong> %(direction_name_pretty)</p><p><strong>Duration:</strong> %(duration_pretty)<br /><p><strong>Details:</strong> <pre>%(attack_details)</pre></p>"
   thresholds:
     inbound:
       subnet:
@@ -114,3 +116,6 @@
   graphite_host: graphite
   graphite_port: 2010
 
+  # It can be difficult to tell the difference between alerts that happen in short order in notifications and stuff
+  # e.g. scanning attacks, so name them!
+  alert_names: ['Ana','Alex','Arlene','Alberto','Andrea','Arthur','Bill','Bonnie','Bret','Beryl','Barry','Bertha','Claudette','Colin','Cindy','Chris','Chantal','Cristobal','Danny','Danielle','Don','Debby','Dorian','Dolly','Erika','Earl','Emily','Ernesto','Erin','Edouard','Fred','Fiona','Franklin','Florence','Fernand','Fay','Grace','Gaston','Gert','Gordon','Gabrielle','Gonzalo','Henri','Hermine','Harvey','Helene','Humberto','Hanna','Ida','Ian','Irma','Isaac','Imelda','Isaias','Joaquin','Julia','Jose','Joyce','Jerry','Josephine','Kate','Karl','Katia','Kirk','Karen','Kyle','Larry','Lisa','Lee','Leslie','Lorenzo','Laura','Mindy','Matthew','Maria','Michael','Melissa','Marco','Nicholas','Nicole','Nate','Nadine','Nestor','Nana','Odette','Otto','Ophelia','Oscar','Olga','Omar','Peter','Paula','Philippe','Patty','Pablo','Paulette','Rose','Richard','Rina','Rafael','Rebekah','Rene','Sam','Shary','Sean','Sara','Sebastien','Sally','Teresa','Tobias','Tammy','Tony','Tanya','Teddy','Victor','Virginie','Vince','Valerie','Van','Vicky','Wanda','Walter','Whitney','William','Wendy','Wilfred']
