@@ -102,7 +102,7 @@ end
 function _M.parse_header(packet)
     local header = {
         ver   = u16(packet,1),
-        len   = u16(packet,3),
+        len   = u16(packet,3) - 16,
         ts    = u32(packet,5),
         hrts  = os_date("%c", ts),
         seq   = u32(packet,9),
@@ -113,10 +113,12 @@ end
 
 function _M.parse_template_fields(set,data)
     local fields = {}
+
     -- For each field, pull type and length
     for i=1,set.no_fields do
         local typ = u16(data,1)
         local len = u16(data,3)
+
         local enterprise_id = nil
         if typ >= 32768 then -- If enterprise bit is set
             enterprise_id = u32(data,5)
@@ -190,7 +192,7 @@ function _M.parse_set(packet)
     }
 
     local set_data = data:sub(1,set.len-4)
-    
+
     packet = packet:sub(set.len+1)
 
     if set.id == 2 then -- If this is a template set then parse as such

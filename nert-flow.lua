@@ -239,6 +239,7 @@ local load_config = function()
     config.average_calculation_period = config.average_calculation_period or (config.bucket_length * 3)
     config.thresholds                 = config.thresholds or {}
     config.attack_protocol_ratio      = config.attack_protocol_ratio or 0.9
+    config.max_flow_packet_length     = config.max_flow_packet_length or 8192
     
     -- Create reverse lookup structures for 'constants'
     -- Also create iterable structures for 'constants' which 
@@ -300,11 +301,15 @@ end
 
 local bootstrap_db = function()
     box.cfg({
-        listen            = config.db_port or 3301,
-        work_dir          = config.work_dir or "./data",
-        snapshot_period   = 300,
-        snapshot_count    = 5,
-        custom_proc_title = 'NeRT Flow'
+        listen             = config.db_port or 3301,
+        work_dir           = config.work_dir or "./data",
+        snapshot_period    = 300,
+        snapshot_count     = 5,
+        slab_alloc_arena   = 2.0,
+        slab_alloc_minimal = 64,
+        slab_alloc_maximal = 786432,
+        slab_alloc_factor  = 0.9,
+        custom_proc_title  = 'NeRT Flow'
     })
 end
 
@@ -438,17 +443,15 @@ local alert2table = function(alert)
     return {
         start_ts       = alert[1],
         direction      = alert[2],
-        stat_type      = alert[3],
-        stat           = alert[4],
-        metric         = alert[5],
-        active         = alert[6] == 1,
-        value          = alert[7],
-        threshold      = alert[8],
-        duration       = alert[9],
-        notified_start = alert[10],
-        notified_end   = alert[11],
-        details        = alert[12],
-        updated_ts     = alert[13],
+        target         = alert[3],
+        active         = alert[4] == 1,
+        value          = alert[5],
+        threshold      = alert[6],
+        duration       = alert[7],
+        notified_start = alert[8],
+        notified_end   = alert[9],
+        details        = alert[10],
+        updated_ts     = alert[11],
     }
 end
 
@@ -466,9 +469,7 @@ local alert2tuple = function(alert)
     return {
         alert.start_ts,
         alert.direction,
-        alert.stat_type,
-        alert.stat,
-        alert.metric,
+        alert.target,
         active,
         alert.value,
         alert.threshold,
@@ -543,7 +544,17 @@ end
 
 local flow_expired = function(args,tuple)
     -- Flows are stored with millisecond precision
-    return tuple[1] < ((fiber.time() * 1000) - args.max_history)
+    local tuple_older_than_history = (tuple[1] < ((fiber.time() - args.max_history) * 1000))
+    local tuple_older_than_day = false
+    if tuple[2] then
+        tuple_older_than_day = (86400 * 1000) < (tuple[2] - tuple[1])
+    end
+
+
+    -- if tuple_older_than_history or tuple_older_than_day then
+    --     log.info('Tuple is expired with age ' .. (fiber.time() - (tuple[1] / 1000)) .. 's, max history is ' .. args.max_history)
+    -- end
+    return tuple_older_than_history or tuple_older_than_day
 end
 
 -- Special case so we don't remove the average bucket at timestamp 0
@@ -608,7 +619,7 @@ local member_alert_deactivate = function(space_id,args,tuple)
     local alert_tuple = alert2tuple(alert)
 
     spc_alerts_historic:insert(alert_tuple)
-    spc_alerts:delete({alert_tuple[1],alert_tuple[2],alert_tuple[3],alert_tuple[4],alert_tuple[5]})
+    spc_alerts:delete({alert_tuple[1],alert_tuple[2],alert_tuple[3]})
 
     -- Dont show expired message for alert which hasn't been notified yet
     if alert.notified_start then
@@ -631,7 +642,7 @@ local setup_db = function()
     box.space.flows:create_index('by_dst_port',{unique = false, parts = {6, 'NUM'}, if_not_exists = true})
     box.space.flows:create_index('by_src_port',{unique = false, parts = {4, 'NUM'}, if_not_exists = true})
     box.space.flows:create_index('by_dir_subnet',{unique = false, parts = {9, 'STR',11,'NUM'}, if_not_exists = true})
-    expirationd.run_task('expire_flows', box.space.flows.id, flow_expired, member_flows_delete, {max_history = config.max_history}, 1000, 3600)
+    expirationd.run_task('expire_flows', box.space.flows.id, flow_expired, member_flows_delete, {max_history = config.max_history}, 1000, 360)
 
     -- FLOWS: {Timestamp}, Data 
     box.schema.space.create('buckets',{field_count=2,if_not_exists = true})
@@ -641,17 +652,16 @@ local setup_db = function()
     -- Delete moving average bucket on start
     -- box.space.buckets:delete({0})
 
-    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 3600)
+    expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, member_bucket_delete, {max_history = config.max_history}, 1000, 360)
 
-    -- Alerts: {{Start Timestamp}, {Direction, Stat Type, Stat, Metric}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, Details, {Updated Timestamp}
     if box.space.alerts then
         box.space.alerts:drop()
     end
-    box.schema.space.create('alerts',{field_count=13,if_not_exists = true})
-    box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR'}, if_not_exists = true})
+    -- Alerts: {{Start Timestamp}, {Direction, Target}}, Active}, Value, Threshold, Duration, Notified Start, Notified End, Details, {Updated Timestamp}
+    box.schema.space.create('alerts',{field_count=11,if_not_exists = true})
+    box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR'}, if_not_exists = true})
     box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
-    box.space.alerts:create_index('by_updated_ts',{unique = false, parts = {13, 'NUM'}, if_not_exists = true})
-    box.space.alerts:create_index('by_hash',{unique = true, parts = {2, 'NUM', 3, 'STR', 4, 'STR', 5, 'STR', 6, 'NUM'}, if_not_exists = true})
+    box.space.alerts:create_index('by_updated_ts',{unique = false, parts = {11, 'NUM'}, if_not_exists = true})
 
     -- This is important. We use alert expiry to set the alert to *inactive* and trigger an event
     expirationd.run_task('expire_alerts', box.space.alerts.id, alert_expired, member_alert_deactivate, {inactive_expiry_time = config.alert_expiry_time}, 10, config.alert_expiry_time)
@@ -675,10 +685,11 @@ local ipfix_listener = function(port,channel)
     local self = fiber.self()
     self:name("ipfix/listener-port-" .. port)
 
+    local max_flow_packet_length = config.max_flow_packet_length
     while 1 == 1 do
         -- Wait until socket has data to read
         sock:readable()
-        local packet, sa = sock:recvfrom()
+        local packet, sa = sock:recvfrom(max_flow_packet_length)
         if packet then -- No packets ready to be received - do nothing
 
             -- Parse recieved packet header
@@ -875,8 +886,9 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 lp.dequeue("Flow packet with no identifiable flow start / end - may be options template!",5)
             end
 
-            -- if flow has valid start and end time
-            if flow_start ~= nil and flow_end ~= nil then
+            -- if flow has valid start and end time, and also has delta changes for packets and octets
+            if flow_start ~= nil and flow_end ~= nil and
+                fields[packetDeltaCount] and fields[octetDeltaCount] then
 
                 -- Extract deltas for metrics
                 local deltaPackets = fields[packetDeltaCount].value
@@ -886,183 +898,207 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
                 local dst_ip       = fields[destinationIPv4Address].value[1]
                 local src_ipnum    = ip.cidr_to_integer_range(src_ip)
                 local dst_ipnum    = ip.cidr_to_integer_range(dst_ip)
-                local src_as       = fields[bgpSourceAsNumber].value
-                local dst_as       = fields[bgpDestinationAsNumber].value
+                local src_as, dst_as
+                if fields[bgpSourceAsNumber] then
+                    src_as       = fields[bgpSourceAsNumber].value
+                end
+                if fields[bgpDestinationAsNumber] then
+                    dst_as       = fields[bgpDestinationAsNumber].value
+                end
                 local src_subnet   = in_subnet(src_ip)
                 local dst_subnet   = in_subnet(dst_ip)
-                local src_port     = fields[sourceTransportPort].value
-                local dst_port     = fields[destinationTransportPort].value
+
+                -- Ports can be unset if protocol has no concept of ports (ICMP..)
+                local src_port, dst_port = 0,0
+
+                if fields[sourceTransportPort] then
+                    src_port     = fields[sourceTransportPort].value
+                end
+                if fields[destinationTransportPort] then
+                    dst_port     = fields[destinationTransportPort].value
+                end
+
                 local protocol     = fields[protocolIdentifier].value
                 local tos          = fields[ipClassOfService].value
                 local status       = fields[flowEndReason].value
 
                 local subnet, flow_dir, ip, flags, icmp_typecode
 
-                if src_subnet ~= nil then
-                    flow_dir = direction.outbound
-                    subnet = src_subnet
-                    ip = src_ip
-                elseif dst_subnet ~= nil then
+                if dst_subnet ~= nil then
                     flow_dir = direction.inbound
-                    subnet = dst_subnet
-                    ip = dst_ip
+                    subnet   = dst_subnet
+                    ip       = dst_ip
+                elseif src_subnet ~= nil then
+                    flow_dir = direction.outbound
+                    subnet   = src_subnet
+                    ip       = src_ip
                 else
                     if src_as == 0 then
                         flow_dir = direction.outbound
-                        subnet = src_subnet
-                        ip = src_ip
+                        subnet   = src_subnet
+                        ip       = src_ip
                     elseif dst_as == 0 then
                         flow_dir = direction.inbound
-                        subnet = dst_subnet
-                        ip = dst_ip
+                        subnet   = dst_subnet
+                        ip       = dst_ip
                     else
                         log.error('Could not calculate flow direction for ' .. src_ip .. ' -> ' .. dst_ip .. ', ignoring...')
                     end
                 end
 
-                -- If this is a TCP flow, identify flags
-                if protocol == proto.TCP then
-                    flags = decode_tcp_flags(fields[tcpControlBits].value)
-                end
-
-                -- If this is an ICMP flow, identify type and code
-                if protocol == proto.ICMP then
-                    icmp_typecode = decode_icmp_type(fields[icmpTypeCodeIPv4])
-                end
-
-                local existing_flow = flow2table(spc_flows:get({
-                    flow_start,
-                    src_ip,
-                    src_port,
-                    dst_ip,
-                    dst_port,
-                    protocol,
-                    tos,
-                }))
-
-                if existing_flow ~= nil then
-                    flow_duration = (flow_end - existing_flow.end_ts) / 1000
-                else
-                    -- Flow duration in seconds
-                    flow_duration = (flow_end - flow_start) / 1000
-                end
-
-
-                -- If flow is active and longer than active_timeout, this is active_timeout worth of observations
-                if (status == flow_status.active_timeout and flow_duration > active_timeout) then
-                    flow_duration = active_timeout 
-
-                -- Otherwise if flow is inactive and longer than idle_timeout, this is idle_timeout worth of observations
-                elseif (status ~= flow_status.active_timeout and flow_duration > idle_timeout) then
-                    flow_duration = idle_timeout 
-                end
-
-                -- Make sure flow duration is never zero
-                -- Flows can be 0 length if they are a single UDP packet
-                -- In this case, just take the values as-is.
-                if flow_duration < 1 then
-                    flow_duration = 1
-                    observed_pps = deltaPackets / bucket_length
-                    observed_bps = (deltaBytes * 8) / bucket_length
-                else
-                    observed_pps = (deltaPackets * (bucket_length / flow_duration)) / bucket_length
-                    observed_bps = ((deltaBytes * 8) * (bucket_length / flow_duration)) / bucket_length
-                end
-
-                observed_fps = 1
-
-                packets = packets + observed_pps
-                bits    = bits + observed_bps
-                flows   = flows + observed_fps
-
-                --if observed_bps > (2*1024*1024) then
-                --    log.info(table.concat({
-                --        flow_start,
-                --        flow_end,
-                --        proto_name(protocol),
-                --        flow_status_name(status), 
-                --        src_ip .. ':' .. src_port .. ' -> ' .. dst_ip .. ':' .. dst_port,
-                --        direction_name(flow_dir),
-                --        flow_duration,
-                --        'seconds',
-                --        observed_pps,
-                --        'pps',
-                --        observed_bps / 1024 / 1024,
-                --        'Mbps'
-                --    },' '))
-                --end
-
-                -- We cheat and just put flows into 'now' slot
-                local bucket_dir = bucket[flow_dir]
-
-                -- Global PPS / BPS / FPS
-                aggregate_stat(bucket_dir,'global',{observed_bps,observed_pps,observed_fps})
-
-                -- Global Protocol PPS / BPS / FPS
-                local proto_name = proto_name(protocol)
-                aggregate_stat(bucket_dir,'protocol',proto_name,{observed_bps,observed_pps,observed_fps})
-
-                -- Subnet PPS / BPS / FPS
-                if subnet then
-                    aggregate_stat(bucket_dir,'subnet',subnet,{observed_bps,observed_pps,observed_fps})
-                    aggregate_stat(bucket_dir,'protocol_subnet_' .. subnet,proto_name,{observed_bps,observed_pps,observed_fps})
-                end
-
-                -- IP PPS / BPS / FPS
-                if ip then
-                    aggregate_stat(bucket_dir,'ip',ip,{observed_bps,observed_pps,observed_fps})
-                    aggregate_stat(bucket_dir,'protocol_ip_' .. ip,proto_name,{observed_bps,observed_pps,observed_fps})
-                end
-
-                -- Global Port PPS / BPS / FPS
-                if config.int_ports[src_port] then
-                    aggregate_stat(bucket_dir,'port',src_port,{observed_bps,observed_pps,observed_fps})
-                elseif config.int_ports[dst_port] then
-                    aggregate_stat(bucket_dir,'port',dst_port,{observed_bps,observed_pps,observed_fps})
-                end
-
-                -- Global / Subnet / IP TCP Flags PPS / BPS / FPS
-                if protocol == proto.TCP then
-                    for _, flag in ipairs(flags) do
-                        aggregate_stat(bucket_dir,'tcp_flag',flag[1],{observed_bps,observed_pps,observed_fps})
-                        if subnet then
-                            aggregate_stat(bucket_dir,'tcp_flag_subnet_' .. subnet,flag[1],{observed_bps,observed_pps,observed_fps})
-                        end
-                        if ip then
-                            aggregate_stat(bucket_dir,'tcp_flag_ip_' .. ip,flag[1],{observed_bps,observed_pps,observed_fps})
-                        end
-
+                if flow_dir then
+                    -- If this is a TCP flow, identify flags
+                    if protocol == proto.TCP then
+                        flags = decode_tcp_flags(fields[tcpControlBits].value)
                     end
-                end
 
-                -- ICMP Type/Code PPS / BPS / FPS
-                if protocol == proto.ICMP then
-                    aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                    -- If this is an ICMP flow, identify type and code
+                    if protocol == proto.ICMP then
+                        icmp_typecode = decode_icmp_type(fields[icmpTypeCodeIPv4])
+                    end
+
+                    local existing_flow = flow2table(spc_flows:get({
+                        flow_start,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        protocol,
+                        tos,
+                    }))
+
+                    if existing_flow ~= nil then
+                        flow_duration = (flow_end - existing_flow.end_ts) / 1000
+                    else
+                        -- Flow duration in seconds
+                        flow_duration = (flow_end - flow_start) / 1000
+                    end
+
+
+                    -- If flow is active and longer than active_timeout, this is active_timeout worth of observations
+                    if (status == flow_status.active_timeout and flow_duration > active_timeout) then
+                        flow_duration = active_timeout 
+
+                    -- Otherwise if flow is inactive and longer than idle_timeout, this is idle_timeout worth of observations
+                    elseif (status ~= flow_status.active_timeout and flow_duration > idle_timeout) then
+                        flow_duration = idle_timeout 
+                    end
+
+                    -- Make sure flow duration is never zero
+                    -- Flows can be 0 length if they are a single UDP packet
+                    -- In this case, just take the values as-is.
+                    if flow_duration < 1 then
+                        flow_duration = 1
+                        observed_pps = deltaPackets / bucket_length
+                        observed_bps = (deltaBytes * 8) / bucket_length
+                    else
+                        observed_pps = (deltaPackets * (bucket_length / flow_duration)) / bucket_length
+                        observed_bps = ((deltaBytes * 8) * (bucket_length / flow_duration)) / bucket_length
+                    end
+
+                    observed_fps = 1
+
+                    packets = packets + observed_pps
+                    bits    = bits + observed_bps
+                    flows   = flows + observed_fps
+
+                    --if observed_bps > (2*1024*1024) then
+                    --    log.info(table.concat({
+                    --        flow_start,
+                    --        flow_end,
+                    --        proto_name(protocol),
+                    --        flow_status_name(status), 
+                    --        src_ip .. ':' .. src_port .. ' -> ' .. dst_ip .. ':' .. dst_port,
+                    --        direction_name(flow_dir),
+                    --        flow_duration,
+                    --        'seconds',
+                    --        observed_pps,
+                    --        'pps',
+                    --        observed_bps / 1024 / 1024,
+                    --        'Mbps'
+                    --    },' '))
+                    --end
+
+                    -- We cheat and just put flows into 'now' slot
+                    local bucket_dir = bucket[flow_dir]
+
+                    -- Global PPS / BPS / FPS
+                    aggregate_stat(bucket_dir,'global',{observed_bps,observed_pps,observed_fps})
+
+                    -- Global Protocol PPS / BPS / FPS
+                    local proto_name = proto_name(protocol)
+                    if proto_name then
+                        aggregate_stat(bucket_dir,'protocol',proto_name,{observed_bps,observed_pps,observed_fps})
+                    end
+
+                    -- Subnet PPS / BPS / FPS
                     if subnet then
-                        aggregate_stat(bucket_dir,'icmp_typecode_subnet_' .. subnet,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                        aggregate_stat(bucket_dir,'subnet',subnet,{observed_bps,observed_pps,observed_fps})
+                        if proto_name then
+                            aggregate_stat(bucket_dir,'protocol_subnet_' .. subnet,proto_name,{observed_bps,observed_pps,observed_fps})
+                        end
                     end
+
+                    -- IP PPS / BPS / FPS
                     if ip then
-                        aggregate_stat(bucket_dir,'icmp_typecode_ip_' .. ip,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                        aggregate_stat(bucket_dir,'ip',ip,{observed_bps,observed_pps,observed_fps})
+                        if proto_name then
+                            aggregate_stat(bucket_dir,'protocol_ip_' .. ip,proto_name,{observed_bps,observed_pps,observed_fps})
+                        end
                     end
+
+                    -- Global Port PPS / BPS / FPS
+                    if config.int_ports[src_port] then
+                        aggregate_stat(bucket_dir,'port',src_port,{observed_bps,observed_pps,observed_fps})
+                    elseif config.int_ports[dst_port] then
+                        aggregate_stat(bucket_dir,'port',dst_port,{observed_bps,observed_pps,observed_fps})
+                    end
+
+                    -- Global / Subnet / IP TCP Flags PPS / BPS / FPS
+                    if protocol == proto.TCP then
+                        for _, flag in ipairs(flags) do
+                            if flag[1] then
+                                aggregate_stat(bucket_dir,'tcp_flag',flag[1],{observed_bps,observed_pps,observed_fps})
+                                if subnet then
+                                    aggregate_stat(bucket_dir,'tcp_flag_subnet_' .. subnet,flag[1],{observed_bps,observed_pps,observed_fps})
+                                end
+                                if ip then
+                                    aggregate_stat(bucket_dir,'tcp_flag_ip_' .. ip,flag[1],{observed_bps,observed_pps,observed_fps})
+                                end
+                            end
+                        end
+                    end
+
+                    -- ICMP Type/Code PPS / BPS / FPS
+                    if protocol == proto.ICMP then
+                        if icmp_typecode[1] then
+                            aggregate_stat(bucket_dir,'icmp_typecode',icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                            if subnet then
+                                aggregate_stat(bucket_dir,'icmp_typecode_subnet_' .. subnet,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                            end
+                            if ip then
+                                aggregate_stat(bucket_dir,'icmp_typecode_ip_' .. ip,icmp_typecode[1],{observed_bps,observed_pps,observed_fps})
+                            end
+                        end
+                    end
+
+                    -- Store flow for use if an alert is triggered
+                    -- {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
+
+                    spc_flows:replace({
+                        flow_start,
+                        flow_end,
+                        src_ip,
+                        src_port,
+                        dst_ip,
+                        dst_port,
+                        protocol,
+                        tos,
+                        subnet or '',
+                        ip or '',
+                        flow_dir or direction.unknown,
+                    })
                 end
-
-                -- Store flow for use if an alert is triggered
-                -- {{{Start Timestamp}, {End Timestamp}}, Src IP, Src Port, Dst Ip, Dst Port, Proto, Tos}, Subnet, IP
-
-                spc_flows:replace({
-                    flow_start,
-                    flow_end,
-                    src_ip,
-                    src_port,
-                    dst_ip,
-                    dst_port,
-                    protocol,
-                    tos,
-                    subnet or '',
-                    ip or '',
-                    flow_dir or direction.unknown,
-                })
-
             end
         else
             fiber.sleep(0.1)
@@ -1145,14 +1181,15 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                             end
 
                             local direction_str = direction_name(direction)
+
                             -- Submit statistic to graphite
-                        
                             local graphite_name = table.concat({
                                 'flow',
                                 stat_type:lower(),
                                 sanitized_stat_name,
                                 direction_str,
                             },'.'):gsub('%.%.','.')
+
 
                             if submit_to_graphite then
                                 -- We don't need ridiculous decimal precision here and the numbers are large
@@ -1256,6 +1293,112 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
     end
 end
 
+local new_bucket_alerter = function(alert_channel)
+    local self = fiber.self()
+    self:name("ipfix/new_bucket-alerter")
+
+    local spc_buckets = box.space.buckets
+    local spc_alerts = box.space.alerts
+    local spc_alerts_by_hash = spc_alerts.index.by_hash
+
+    local bucket_length = config.bucket_length
+
+    local attack_protocol_ratio = config.attack_protocol_ratio
+
+    while 1 == 1 do
+        local alert_stats = alert_channel:get()
+
+        if alert_stats then
+            local alert, stats = unpack(alert_stats)
+            local now = math_ceil(fiber.time())
+
+
+            -- Get attack details from active stats (these may be used to identify target)
+            local stats_directed = stats[alert.direction]
+
+            -- This is the number of the metric that broke the threshold
+            local metric_num = metric[alert.metric]
+
+            -- Get total counter for this metric from bucket stats
+            local total_metric = stats_directed.global.global[metric_num]
+            local total_ratio  = attack_protocol_ratio * total_metric
+
+            alert.details = {}
+            alert.target = nil
+
+            local target_type
+
+            -- Identify target from threshold data
+            if alert.stat_type == 'subnet' then
+                alert.target = alert.stat
+                alert.details.subnet = alert.stat
+                target_type  = 'subnet'
+
+                -- We can try to narrow the target down to a single host by scanning
+                -- the IP stats for this instant
+
+                -- If this is against a subnet we can reduce the number of table lookups
+                -- We need to make instead of checking all IPs
+                -- We know the subnet so we use the ratio against the subnet traffic
+                -- Rather than globally
+                
+                local subnet_metric = stats_directed.subnet[alert.subnet][metric_num]
+                local subnet_ratio = attack_protocol_ratio * subnet_metric
+
+                log.info('Alert triggered on subnet ' .. alert.subnet)
+                local sub_lo,sub_high = ip.cidr_to_integer_range(alert.subnet)
+                for i=sub_lo, sub_high do
+                    local cur_ip = ip_addr_reverse[i]
+                    if stats_directed.ip[cur_ip] then
+                        local ip_stat = stats_directed.ip[cur_ip][metric_num]
+                        if ip_stat > subnet_ratio then
+                            alert.target = cur_ip
+                            target_type  = 'host'
+                            log.info('Alert triggered on host ' .. alert.target)
+                        end
+                    end
+                end
+                 
+            -- If this is a single IP alert then we need to grab the subnet from the IP
+            elseif alert.stat_type == 'ip' then
+                alert.target = alert.stat
+                alert.details.subnet = in_subnet(alert.stat)     
+                target_type = 'host'
+
+            -- If this was any other alert then we need to scan all known IP's to
+            -- look for the target
+            else
+                for i, cur_ip in ipairs(ip_addr_reverse) do
+                    if stats_directed.ip[cur_ip] then
+                        local ip_stat = stats_directed.ip[cur_ip][metric_num]
+                        if ip_stat > total_ratio then
+                            local ip_metric = stats_directed.ip[cur_ip][metric_num]
+                            alert.target = cur_ip
+                            alert.details.subnet = in_subnet(cur_ip)
+                            target_type = 'host'
+                        end
+                    end
+                end
+            end
+
+            if not target_type then
+                log.error('We identified a threshold being broken but could not identify the target!')
+                rPrint(alert)
+            else
+                -- Check if active alert already exists towards this target
+                -- Insert alert to DB against target
+                -- Check protocol vs. already-seen for this alert
+
+                -- Grab peak global and target-based speeds (current)
+
+            end
+
+        else
+            fiber.sleep(0.1)
+        end
+    end
+end
+
 local bucket_alerter = function(alert_channel)
     local self = fiber.self()
     self:name("ipfix/bucket-alerter")
@@ -1263,6 +1406,8 @@ local bucket_alerter = function(alert_channel)
     local spc_buckets = box.space.buckets
     local spc_alerts = box.space.alerts
     local spc_alerts_by_hash = spc_alerts.index.by_hash
+
+    local bucket_length = config.bucket_length
 
     local attack_protocol_ratio = config.attack_protocol_ratio
 
@@ -1384,14 +1529,11 @@ local bucket_alerter = function(alert_channel)
                 proto_stat_name     = 'protocol_subnet_'..subnet
                 tcp_flag_stat_name  = 'tcp_flag_subnet_'..subnet
                 icmp_type_stat_name = 'icmp_typecode_subnet_'..subnet
-
             else
                 alert.match_ratio   = total_ratio
                 alert.match_metric  = total_metric
                 alert.match_type    = 'global'
             end
-
-            alert.protocol_name = 'Unknown'
 
             local details = alert.details
 
@@ -1404,6 +1546,7 @@ local bucket_alerter = function(alert_channel)
                 if stats_directed[proto_stat_name][proto_name] then
                     local proto_stat = stats_directed[proto_stat_name][proto_name][metric_num]
                     if proto_stat > alert.match_ratio then
+                        alert.protocol           = proto_num
                         alert.details.protocol   = proto_num
                         alert.protocol_name      = proto_name:upper()
                         alert.protocol_certainty = ((proto_stat / alert.match_metric) * 100)
@@ -1418,7 +1561,7 @@ local bucket_alerter = function(alert_channel)
 
                 for _, cur_flag in ipairs(tcp_flags_iter) do
                     local flag_name, flag_num = unpack(cur_flag)
-                    if stats_directed[tcp_flag_stat_name][flag_name] then
+                    if stats_directed[tcp_flag_stat_name] and stats_directed[tcp_flag_stat_name][flag_name] then
                         local tcp_flag_stat = stats_directed[tcp_flag_stat_name][flag_name][metric_num]
                         -- This is a TCP attack - if more than match_ratio TCP traffic
                         -- matches a specific flag, then this is a TCP flag based attack
@@ -1437,15 +1580,19 @@ local bucket_alerter = function(alert_channel)
                     local icmp_stat = icmp_stats[metric_num]
                     if icmp_stat > alert.match_ratio then
                         alert.details.icmp_type_name = icmp_name
-                        alert.protocol_name  = table.concat({alert.protocol_name,icmp_name},' ')
+                        alert.protocol_name  = table.concat({alert.protocol_name,icmp_name:upper()},' ')
                         alert.protocol_certainty = ((icmp_stat / alert.match_metric) * 100)
                     end
                 end 
             end
 
-            if not details.peak_global then
+            if not details.peak_global_inbound then
                 details.peak_global_inbound  = get_value_mt()
+            end
+            if not details.peak_global_outbound then
                 details.peak_global_outbound = get_value_mt()
+            end
+            if not details.peak_global_unknown then
                 details.peak_global_unknown  = get_value_mt()
             end
 
@@ -1456,6 +1603,7 @@ local bucket_alerter = function(alert_channel)
                     if stats[dir_num].global then
                         local value = stats[dir_num].global.global[offset]
                         if value > details[peak_name][offset] then
+                            log.info('New Peak ' .. dir_name .. ' for metric ' .. metric .. ': ' .. value .. ' > ' .. details[peak_name][offset])
                             details[peak_name][offset] = value
                             details['global_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
                         end
@@ -1465,38 +1613,52 @@ local bucket_alerter = function(alert_channel)
                 end
             end
 
-            if not details.peak_target then
+            if not details.peak_target_inbound then
                 details.peak_target_inbound  = get_value_mt()
+            end
+            if not details.peak_target_outbound then
                 details.peak_target_outbound = get_value_mt()
+            end
+            if not details.peak_target_unknown then
                 details.peak_target_unknown  = get_value_mt()
             end
 
             -- Track target traffic rates for duration of alert
-            if alert.target ~= nil or alert.subnet ~= nil then
-                for dir_num,dir_name in ipairs(direction_reverse) do
-                    local peak_name = 'peak_target_'..dir_name
-                    local target_stats
-                    if alert.target ~= nil then
-                        if stats[dir_num].ip then
-                            target_stats = stats[dir_num].ip[alert.target]
-                        end
-                    elseif alert.subnet ~= nil then
-                        if stats[dir_num].subnet then
-                            target_stats = stats[dir_num].subnet[alert.subnet]
-                        end
-                    end
+            for dir_num,dir_name in ipairs(direction_reverse) do
+                local peak_name = 'peak_target_'..dir_name
+                local target_stats
 
-                    for offset,metric in ipairs(metric_reverse) do
-                        if target_stats then
-                            local value = target_stats[offset]
-                            
+                if alert.target ~= nil then
+                    if stats[dir_num].ip then
+                        target_stats = stats[dir_num].ip[alert.target]
+                        log.info('Alert has target ' .. alert.target)
+                    end
+                elseif alert.subnet ~= nil then
+                    if stats[dir_num].subnet then
+                        target_stats = stats[dir_num].subnet[alert.subnet]
+                        log.info('Alert has target ' .. alert.subnet)
+                    end
+                end
+
+
+                for offset,metric in ipairs(metric_reverse) do
+                    local metric_name = 'target_'..dir_name .. '_' .. metric .. '_pretty'
+
+                    if target_stats then
+                        local value = target_stats[offset]
+                        if value then
                             if value > details[peak_name][offset] then
                                 details[peak_name][offset] = value
-                                details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(details[peak_name][offset],offset)
+                                details[metric_name] = pretty_value(value,offset)
                             end
                         else
-                            details['target_' .. dir_name .. '_' .. metric .. '_pretty'] = pretty_value(0,offset) 
+                            -- If it's not already set then set the target metric to 0
+                            if not details[metric_name] then
+                                details[metric_name] = pretty_value(0,offset)
+                            end
                         end
+                    else
+                        details[metric_name] = pretty_value(0,offset)
                     end
                 end
             end
@@ -1507,6 +1669,8 @@ local bucket_alerter = function(alert_channel)
 
             -- Attempt to get current averages
             local avg_bucket = bucket2table(spc_buckets:get{0})
+
+            -- EWMA: local avg_target_exp_value = math.exp(-bucket_length/300)
 
             if avg_bucket then
                 local avg_directed = avg_bucket.data[alert.direction] 
@@ -1534,10 +1698,21 @@ local bucket_alerter = function(alert_channel)
                 end
 
                 for offset,metric in ipairs(metric_reverse) do
+                    if not details['avg_directed_' .. metric] then
+                        details['avg_directed_' .. metric] = 0
+                    end
+                    if not details['avg_global_' .. metric] then
+                        details['avg_global_' .. metric] = 0
+                    end
+
                     if avg_stats then
                         local value = avg_stats[offset]
-                        details['avg_directed_' .. metric .. '_pretty'] = pretty_value(value,offset)
-                        details['total_directed_' .. metric .. '_pretty'] = pretty_value(value * alert.duration,metric_totals[metric])
+                        local avg_value = details['avg_directed_' .. metric]
+                        avg_value = (avg_value + value) / 2
+                        -- EWMA: avg_value = value + avg_target_exp_value * (avg_value - value)
+
+                        details['avg_directed_' .. metric .. '_pretty'] = pretty_value(avg_value,offset)
+                        details['total_directed_' .. metric .. '_pretty'] = pretty_value(avg_value * alert.duration,metric_totals[metric])
                     else
                         details['avg_directed_' .. metric .. '_pretty'] = pretty_value(0,offset)
                         details['total_directed_' .. metric .. '_pretty'] = pretty_value(0,offset) 
@@ -1545,7 +1720,11 @@ local bucket_alerter = function(alert_channel)
 
                     if global_stats then
                         local value = global_stats[offset]
-                        details['avg_global_' .. metric .. '_pretty'] = pretty_value(value,offset)
+                        local avg_value = details['avg_global_' .. metric]
+                        avg_value = (avg_value + value) / 2
+                        -- EWMA: avg_value = value + avg_target_exp_value * (avg_value - value)
+
+                        details['avg_global_' .. metric .. '_pretty'] = pretty_value(avg_value,offset)
                     else
                         details['avg_global_' .. metric .. '_pretty'] = pretty_value(0,offset) 
                     end
@@ -1554,7 +1733,7 @@ local bucket_alerter = function(alert_channel)
 
             alert.direction_name              = direction_name(alert.direction)
             details.duration_pretty           = pretty_duration(alert.duration)
-            details.subnet_pretty             = alert.subnet
+            details.subnet_pretty             = alert.subnet or 'Unknown'
             details.direction_name_pretty     = uc_first(alert.direction_name)
             details.start_time_pretty         = os.date("!%a, %d %b %Y %X GMT",alert.start_ts)
             details.metric_pretty             = alert.metric:upper()
@@ -1565,13 +1744,18 @@ local bucket_alerter = function(alert_channel)
             local new_protocol = false
 
             -- Check if this is a new protocol
-            if not details.protocol_name[alert.protocol_name] then
+            if alert.protocol_name and not details.protocol_name[alert.protocol_name] then
                 new_protocol = true
+                details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
             end
 
-            details.protocol_name[alert.protocol_name] = details.protocol_certainty_pretty
+            local unique_proto_names = dedup_keys(details.protocol_name,true)
+            if #unique_proto_names > 0 then
+                details.protocol_name_pretty      = table.concat(unique_proto_names,', ')
+            else
+                details.protocol_name_pretty      = 'Unknown'
+            end
 
-            details.protocol_name_pretty      = table.concat(dedup_keys(details.protocol_name,true),', ')
             -- Only use this when event expires, this is the *last* time we saw the anomaly
             details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
 
@@ -1667,6 +1851,58 @@ local ipfix_background_saver = function()
     end
 end
 
+local stat_generator = function(graphite_channel)
+    local self = fiber.self()
+    self:name("ipfix/stat-generator")
+
+    while 1 == 1 do
+        local now = math_ceil(fiber.time())
+
+        -- Submit size of each box to graphite
+        for k, v in box.space._space:pairs() do
+            local space_name = v[3]
+            if box.space[space_name].index[0] ~= nil then
+                tuple_count = box.space[space_name].index[0]:count()
+            else
+                tuple_count = 0
+            end
+
+            graphite_channel:put({'flow.stats.space.'..space_name..'.tuple_count',math_ceil(tuple_count),now})
+        end
+
+        for field, value in pairs(box.slab.info()) do
+            if type(value) == "number" then
+                graphite_channel:put({'flow.stats.box.slab.'..field,math_ceil(value),now})
+
+            else
+                if field == 'slabs' then
+                    -- Submit each slab size plus item count and used
+                    for _, slabvar in ipairs(value) do
+                        local stat_path = 'flow.stats.box.slab.slabs.'..tostring(slabvar.item_size)
+                        graphite_channel:put({stat_path .. '.count',slabvar.item_count,now})
+                        graphite_channel:put({stat_path .. '.mem_free',slabvar.mem_free,now})
+                        graphite_channel:put({stat_path .. '.mem_used',slabvar.mem_used,now})
+                        graphite_channel:put({stat_path .. '.slab_count',slabvar.slab_count,now})
+                        graphite_channel:put({stat_path .. '.slab_size',slabvar.slab_size,now})
+                    end
+                end
+            end
+        end
+        for field, value in pairs(box.stat()) do
+            if type(value) == "table" then
+                local field = field:lower()
+                if value.total then
+                    graphite_channel:put({'flow.stats.box.stat.'..field..'.total',math_ceil(value.total),now})
+                end
+                if value.rps then
+                    graphite_channel:put({'flow.stats.box.stat.'..field..'.rps',math_ceil(value.rps),now})
+                end
+            end
+        end
+        fiber.sleep(10)
+    end
+end
+
 local start_fibers = function()
     -- Start listener for each unique listening port (we *can* have multiple sources per port)
     local ipfix_channel     = fiber.channel(config.fiber_channel_capacity or 1024)
@@ -1674,7 +1910,7 @@ local start_fibers = function()
     local graphite_channel  = fiber.channel(8192)
     local alert_channel     = fiber.channel(1024)
 
-    local bgsaver, aggregator, monitor, submitter, alerter
+    local bgsaver, aggregator, monitor, submitter, alerter, statter
     local listeners = {}
 
     while 1 == 1 do
@@ -1705,9 +1941,15 @@ local start_fibers = function()
         end
 
         -- Read from alert_channel
-        if not alerter or alerter.status() == 'dead' then
-            log.info('(Re)starting alerter')
-            alerter = fiber.create(bucket_alerter,alert_channel)
+        -- if not alerter or alerter.status() == 'dead' then
+        --     log.info('(Re)starting alerter')
+        --     alerter = fiber.create(bucket_alerter,alert_channel)
+        -- end
+
+        -- Write to graphite_channel
+        if not statter or statter.status() == 'dead' then
+            log.info('(Re)starting graphite statter')
+            statter = fiber.create(stat_generator,graphite_channel)
         end
 
         -- Read from graphite_channel
