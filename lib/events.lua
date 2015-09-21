@@ -29,6 +29,7 @@ function rPrint(s, l, i) -- recursive Print (structure, limit, indent)
     end
     return l
 end
+
 _M.trigger = function(event,delay,attributes)
     local now          = os.date("!%a, %d %b %Y %X GMT",fiber_time())
     local events      = _M.config.events
@@ -70,11 +71,14 @@ _M.trigger = function(event,delay,attributes)
                     local json_body = json_encode(notify_body)
 
                     -- Submit request to Hipchat
+                    
+                    rPrint(json_body)
+
                     local res = curl_request('POST',action_endpoint.url,json_body,{headers = headers})
 
                     if res.status ~= 204 then
                         log_error("Unable to submit notification with following body due to status %(status):\n: %(notify_body)" % {
-                            status = res.status,
+                            status      = res.status,
                             notify_body = json_body
                         })
                     end
