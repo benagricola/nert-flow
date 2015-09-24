@@ -443,6 +443,8 @@ local alert2table = function(alert)
     if alert == nil then
         return nil
     end
+    local notified_start = alert[9] == 1
+    local notified_end   = alert[10] == 1
     return {
         start_ts       = alert[1],
         direction      = alert[2],
@@ -452,8 +454,8 @@ local alert2table = function(alert)
         value          = alert[6],
         threshold      = alert[7],
         duration       = alert[8],
-        notified_start = alert[9],
-        notified_end   = alert[10],
+        notified_start = notified_start,
+        notified_end   = notified_end,
         details        = alert[11],
         updated_ts     = alert[12],
     }
@@ -661,12 +663,6 @@ local member_alert_deactivate = function(space_id,args,tuple)
     -- Update in db
     local spc_alerts          = box.space.alerts
 
-    local alert_tuple = alert2tuple(alert)
-
-    rPrint(alert)
-
-    spc_alerts:delete({alert.start_ts,alert.direction,alert.target_type,alert.target})
-
     -- Dont show expired message for alert which hasn't been notified yet
     if alert.notified_start then
         if not alert.notified_end then
@@ -675,6 +671,7 @@ local member_alert_deactivate = function(space_id,args,tuple)
             end
         end
     end
+    spc_alerts:replace(alert2tuple(alert))
 end
 
 local setup_db = function()
@@ -1397,6 +1394,12 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                     alert.notified_start = false
                     alert.notified_end   = false
                     alert.details.metric = alert.metric
+                    alert.details.id = digest.crc32(tbl_concat({
+                        alert.direction,
+                        alert.target_type,
+                        alert.target,
+                        alert.start_ts,
+                    }) .. fiber.time())
                 end
 
                 alert.details.match_metric = stats_directed.subnet[alert.target][metric_num]
@@ -1426,6 +1429,8 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                 },'_')
 
 
+                local proto_changed = false
+
                 -- Calculate traffic profile, this compares to the total traffic of 'global', or 'subnet', or 'host'
                 for _, cur_proto in ipairs(proto_iter) do
                     local proto_name, proto_num = unpack(cur_proto)
@@ -1435,7 +1440,13 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
 
                         -- If stat is more than e.g. '85%' of the target total traffic levels
                         if proto_stat > alert.details.match_ratio then
-                            alert.details.protocol      = proto_num
+                            local new_proto = proto_num
+
+                            if alert.details.protocol ~= nil and new_proto ~= alert.details.protocol then
+                                proto_changed = true
+                            end
+
+                            alert.details.protocol      = new_proto
                             alert.details.protocol_name = proto_name:upper()
                             alert.details.protocol_certainty = ((proto_stat / alert.details.match_metric) * 100)
                             log.info('Protocol is ' .. alert.details.protocol_name .. ' with certainty ' .. tostring(alert.details.protocol_certainty))
@@ -1467,7 +1478,13 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                         for icmp_name, icmp_stats in pairs(icmp_table) do
                             local icmp_stat = icmp_stats[metric_num]
                             if icmp_stat > alert.details.match_ratio then
-                                alert.details.icmp_type_name     = icmp_name
+                                local new_icmp_type_name = icmp_name
+
+                                if alert.details.icmp_type_name ~= nil and new_icmp_type_name ~= alert.details.icmp_type_name then
+                                    proto_changed = true
+                                end
+
+                                alert.details.icmp_type_name     = new_icmp_type_name
                                 alert.details.protocol_certainty = ((icmp_stat / alert.details.match_metric) * 100)
                                 alert.details.protocol_name      = tbl_concat({alert.details.protocol_name,icmp_name:upper()},' ')
                             end
@@ -1519,6 +1536,14 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                 
                 log.info('Generating details...')
                 alert.details.direction_name            = direction_name(alert.direction)
+                if alert.direction == direction.inbound then
+                    alert.details.direction_applied_pretty = 'towards'
+                elseif alert.direction == direction.outbound then
+                    alert.details.direction_applied_pretty = 'originating from'
+                else
+                    alert.details.direction_applied_pretty = 'to or from'
+                end
+
                 alert.details.duration_pretty           = pretty_duration(alert.duration)
                 alert.details.target_pretty             = alert.target or 'Unknown'
                 alert.details.direction_name_pretty     = uc_first(alert.details.direction_name)
@@ -1528,6 +1553,16 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                 alert.details.threshold_pretty          = pretty_value(alert.threshold,metric_num)
                 alert.details.protocol_name_pretty      = alert.details.protocol_name or 'Unknown'
                 alert.details.protocol_certainty_pretty = string.format('(%.1f%%)',alert.details.protocol_certainty or 0)
+
+                -- Name this alert for easier visibility
+                if not alert.details.name_pretty then
+                    alert.details.name_pretty = get_consistent({
+                        alert.direction,
+                        alert.target_type,
+                        alert.target,
+                        alert.start_ts,
+                    },config.alert_names)
+                end
 
                 -- Only use this when event expires, this is the *last* time we saw the anomaly
                 alert.details.end_time_pretty           = os.date("!%a, %d %b %Y %X GMT",alert.updated_ts)
@@ -1562,15 +1597,17 @@ local new_bucket_alerter = function(alert_channel,graphite_channel)
                 alert.details.attack_details = format_alert_details(alert)
 
                 if not alert.notified_start then
-                    log.info('Triggering event...')
+                    log.info('Triggering alert_active...')
                     if events.trigger('alert_active',alert.duration,alert.details) then
                         alert.notified_start = true
                     end
+                elseif proto_changed then
+                    log.info('Triggering alert_new_protocol...')
+                    events.trigger('alert_new_protocol',alert.duration,alert.details)
                 end
 
                 -- Update stored alert in database
-                local alert_tuple = alert2tuple(alert)
-                spc_alerts:replace(alert_tuple)
+                spc_alerts:replace(alert2tuple(alert))
             end
         else
             fiber.sleep(0.1)

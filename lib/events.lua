@@ -7,6 +7,7 @@ local util         = require('util')
 local os_date      = require("os").date
 local curl_request = require("http.client").request
 local log_error    = require("log").error
+local log_info    = require("log").info
 local json_encode  = require("json").encode
 local table_concat = require("table").concat
 local fiber_time   = require("fiber").time
@@ -45,13 +46,15 @@ _M.trigger = function(event,delay,attributes)
 
             -- For each action
             for action_name, action_settings in pairs(actions) do
-
-                local action_message  = action_settings.message
-                local action_color    = action_settings.color
-                local action_endpoint = action_settings.endpoint
             
                 -- If action name is hipchat
                 if action_name == 'hipchat' then
+                    log_info('Alerting for hipchat_action: ID ' .. tostring(attributes.id))
+
+                    local action_message  = action_settings.message
+                    local action_color    = action_settings.color
+                    local action_endpoint = action_settings.endpoint
+
                     -- Build up notification message 
                     attributes.event_name = event:upper()
                     local message = action_message % attributes
@@ -70,9 +73,7 @@ _M.trigger = function(event,delay,attributes)
 
                     local json_body = json_encode(notify_body)
 
-                    -- Submit request to Hipchat
-                    
-                    rPrint(json_body)
+                    -- Submit request to Hipchat API
 
                     local res = curl_request('POST',action_endpoint.url,json_body,{headers = headers})
 
@@ -82,9 +83,44 @@ _M.trigger = function(event,delay,attributes)
                             notify_body = json_body
                         })
                     end
+                
+                -- If action name is pagerduty
+                elseif action_name == 'pagerduty' then
+                    local action_type        = action_settings.type
+                    local action_description = action_settings.description % attributes
+                    local action_endpoint    = action_settings.endpoint
+
+                    log_info('Alerting for pagerduty_action: ' .. action_type .. ' ID ' .. tostring(attributes.id))
+
+                    -- Build up notification body
+                    local notify_body = {
+                       service_key  = action_endpoint.service_key or '',
+                       incident_key = tostring(attributes.id),
+                       details      = attributes,
+                       client       = action_endpoint.client,
+                       event_type   = action_type,
+                       description  = action_description,
+                    }
+
+                    local headers = {}
+
+                    headers['content-type'] = 'application/json'
+
+                    local json_body = json_encode(notify_body)
+
+                    -- Submit request to Pagerduty API
+
+                    local res = curl_request('POST',action_endpoint.url,json_body,{headers = headers})
+
+                    if res.status ~= 200 then
+                        log_error("Unable to submit notification with following body due to status %(status):\n: %(notify_body)" % {
+                            status      = res.status,
+                            notify_body = json_body
+                        })
+                    end
                 end
-                return true
             end
+            return true
         end
     end
     return false
