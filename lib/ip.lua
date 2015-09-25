@@ -21,6 +21,19 @@ for i=1,32 do
     bin_inverted_masks[i] = bit_xor(bin_masks[i], bin_masks[32])
 end
 
+function _M.in_subnet(ip,subnets)
+    for i=1, #subnets do
+        local sub_low, sub_high, cidr = unpack(subnets[i])
+
+        local ip_low, ip_high = _M.cidr_to_integer_range(ip)
+
+        if ip_low > sub_low and ip_high < sub_high then
+            return cidr
+        end
+    end
+    return nil
+end
+
 function _M.unsign(n)
     if n < 0 then
         n = 4294967296 + n
