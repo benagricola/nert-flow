@@ -1,3 +1,9 @@
+local tbl        = require("table")
+local tbl_insert = tbl.insert
+local pairs      = pairs
+local log        = require("log")
+local log_error  = log.error
+
 local _M = {
 
     -- Define constants
@@ -126,28 +132,28 @@ local _M = {
 }
 
 _M.tcp_flags_name = function(tcp_flags_num)
-    if not tcp_flags_reverse[tcp_flags_num] then
-        log.error('Unidentified TCP flag: ' .. tcp_flags_num)
+    if not _M.tcp_flags_reverse[tcp_flags_num] then
+        log_error('Unidentified TCP flag: ' .. tcp_flags_num)
     end
-    return tcp_flags_reverse[tcp_flags_num] or 'unknown'
+    return _M.tcp_flags_reverse[tcp_flags_num] or 'unknown'
 end
 
 _M.proto_name = function(proto_num)
-    if not proto_reverse[proto_num] then
-        log.error('Unidentified protocol number: ' .. proto_num)
+    if not _M.proto_reverse[proto_num] then
+        log_error('Unidentified protocol number: ' .. proto_num)
     end
-    return proto_reverse[proto_num] or 'other'
+    return _M.proto_reverse[proto_num] or 'other'
 end
 
 _M.direction_name = function(direction_num) 
-    return direction_reverse[direction_num] or 'unknown'
+    return _M.direction_reverse[direction_num] or 'unknown'
 end
 
 _M.flow_status_name = function(flow_status_num) 
-    if not flow_status_reverse[flow_status_num] then
-        log.error('Unidentified flow status: ' .. flow_status_num)
+    if not _M.flow_status_reverse[flow_status_num] then
+        log_error('Unidentified flow status: ' .. flow_status_num)
     end
-    return flow_status_reverse[flow_status_num] or 'unknown'
+    return _M.flow_status_reverse[flow_status_num] or 'unknown'
 end
 
 for tcp_flags_name, tcp_flags_num in pairs(_M.tcp_flags) do

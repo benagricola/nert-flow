@@ -33,10 +33,13 @@ local log_debug   = log.debug
 local json        = require("json")
 local json_encode = json.encode
 
+local util        = require("util")
 local events      = require("events")
 local constants   = require("constants")
 
-local socket      = require("socket")
+local ipfix_listener     = require('ipfix_listener')
+local graphite_submitter = require('graphite_submitter')
+local stat_generator     = require('stat_generator')
 
 ProFi = require 'ProFi'
 ProFi:setGetTimeMethod(fiber.time)
@@ -271,7 +274,7 @@ local alert_deactivate = function(space_id,args,tuple)
             end
         end
     end
-    spc_alerts:replace(alert2tuple(alert))
+    spc_alerts:delete({alert.start_ts,alert.direction,alert.target_type,alert.target})
 end
 
 local setup_db = function()
@@ -304,7 +307,7 @@ local setup_db = function()
     box.schema.space.create('alerts',{field_count=12,if_not_exists = true})
     box.space.alerts:create_index('primary',{unique = true, type = 'HASH', parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR'}, if_not_exists = true})
     box.space.alerts:create_index('by_ts',{unique = false, parts = {1, 'NUM'}, if_not_exists = true})
-    box.space.alerts:create_index('by_target',{unique = true, parts = {1, 'NUM', 2, 'NUM', 3, 'STR', 4, 'STR', 5, 'NUM'}, if_not_exists = true})
+    box.space.alerts:create_index('by_target',{unique = true, parts = {2, 'NUM', 3, 'STR', 4, 'STR', 5, 'NUM'}, if_not_exists = true})
     box.space.alerts:create_index('by_updated_ts',{unique = false, parts = {12, 'NUM'}, if_not_exists = true})
 
 
@@ -313,65 +316,6 @@ local setup_db = function()
     expirationd.run_task('expire_buckets', box.space.buckets.id, bucket_expired, bucket_delete, {max_history = config.max_history}, 1000, 360)
     expirationd.run_task('expire_avg_stats', box.space.avg_stats.id, avg_stat_expired, avg_stats_delete, {}, 1000, 360)
     expirationd.run_task('expire_alerts', box.space.alerts.id, alert_expired, alert_deactivate, {inactive_expiry_time = config.alert_expiry_time}, 10, config.alert_expiry_time)
-end
-
-
-local ipfix_listener = function(port,channel)
-
-    -- Bind to configured ports
-    local sock = socket('AF_INET','SOCK_DGRAM', 'udp')
-    sock:setsockopt(proto.UDP,'SO_REUSEADDR',true)
-    sock:bind("0.0.0.0",port)
-
-    -- Set fiber listener name
-    local self = fiber.self()
-    self:name("ipfix/listener-port-" .. port)
-
-    local max_flow_packet_length = config.max_flow_packet_length
-
-    while 1 == 1 do
-        -- Wait until socket has data to read
-        sock:readable()
-        local packet, sa = sock:recvfrom(max_flow_packet_length)
-        if packet then -- No packets ready to be received - do nothing
-
-            -- Parse recieved packet header
-            local header, packet = ipfix.parse_header(packet)
-
-            -- Make sure this parses correctly as a V10 packet, otherwise skip
-            if header.ver == 10 then
-                -- Parse packet sets while we still have some
-                while #packet > 0 do
-                    
-                    set, packet = ipfix.parse_set(packet)
-
-                    if set.id ~= 2 and set.id ~= 3 then
-                        local new_flows = set.flows
-                        -- If we have new flows, then 
-                        if new_flows then
-                            for i=1,#new_flows do
-
-                                local channel_count = channel:count()
-
-                                -- If channel is full then cache flows here and attempt submission later
-                                if channel:is_full() then
-                                    lp.dequeue("DATA LOST - Fiber channel full. Please increase fiber_channel_capacity config setting",5)
-                                else 
-                                    if channel_count > (config.fiber_channel_capacity * config.fiber_channel_full_perc) then
-                                        lp.dequeue("Fiber channel is almost full! Please check your fiber_channel_capacity setting",5)
-                                    end
-                                    local flow = new_flows[i]
-                                    if not channel:put(flow,config.fiber_channel_timeout) then
-                                        lp.dequeue("Error submitting to fiber channel",5)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
 end
 
 
@@ -828,7 +772,7 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                         local long_offset = 3 + offset
                                         if threshold_values[metric] and threshold_values[metric].pct then
                                             local threshold = (avg_values[long_offset] * (threshold_values[metric].pct / 100))
-                                            if avg_values[offset] > (avg_values[long_offset] * (threshold_values[metric].pct / 100)) then
+                                            if avg_values[offset] > threshold then
                                                 local broken = {
                                                     metric    = metric,
                                                     stat_type = stat_type,
@@ -1031,35 +975,69 @@ local bucket_alerter = function(alert_channel,graphite_channel)
                     alert.details.peak_target_unknown  = get_value_mt()
                 end
 
+                if not alert.details.peak_global_inbound then
+                    alert.details.peak_global_inbound  = get_value_mt()
+                end
+                if not alert.details.peak_global_outbound then
+                    alert.details.peak_global_outbound = get_value_mt()
+                end
+                if not alert.details.peak_global_unknown then
+                    alert.details.peak_global_unknown  = get_value_mt()
+                end
+
                 -- Track target traffic rates for duration of alert
                 for dir_num,dir_name in ipairs(direction_reverse) do
-                    local peak_name = 'peak_target_'..dir_name
-                    local target_stats
+                    local target_peak_name = 'peak_target_'..dir_name
+                    local global_peak_name = 'peak_global_'..dir_name
+
+                    local target_stats, global_stats
 
                     if stats[dir_num] and stats[dir_num][alert.target_type] then
                         target_stats = stats[dir_num][alert.target_type][alert.target]
                     end
 
+                    if stats[dir_num] and stats[dir_num].global then
+                        global_stats = stats[dir_num].global.global
+                    end
 
                     for offset,metric in ipairs(metric_reverse) do
-                        local metric_name = 'target_'..dir_name .. '_' .. metric .. '_pretty'
+                        local target_metric_name = 'target_'..dir_name .. '_' .. metric .. '_pretty'
+                        local global_metric_name = 'global_'..dir_name .. '_' .. metric .. '_pretty'
+
+                        if global_stats then
+                            local value = global_stats[offset]
+                            if value then
+                                if value > alert.details[global_peak_name][offset] then
+                                    alert.details[global_peak_name][offset] = value
+                                    alert.details[global_metric_name] = pretty_value(value,offset)
+                                end
+                            else
+                                -- If it's not already set then set the target metric to 0
+                                if not alert.details[global_metric_name] then
+                                    alert.details[global_metric_name] = pretty_value(0,offset)
+                                end
+                            end
+                        else
+                            alert.details[global_metric_name] = pretty_value(0,offset)
+                        end
 
                         if target_stats then
                             local value = target_stats[offset]
                             if value then
-                                if value > alert.details[peak_name][offset] then
-                                    alert.details[peak_name][offset] = value
-                                    alert.details[metric_name] = pretty_value(value,offset)
+                                if value > alert.details[target_peak_name][offset] then
+                                    alert.details[target_peak_name][offset] = value
+                                    alert.details[target_metric_name] = pretty_value(value,offset)
                                 end
                             else
                                 -- If it's not already set then set the target metric to 0
-                                if not alert.details[metric_name] then
-                                    alert.details[metric_name] = pretty_value(0,offset)
+                                if not alert.details[target_metric_name] then
+                                    alert.details[target_metric_name] = pretty_value(0,offset)
                                 end
                             end
                         else
-                            alert.details[metric_name] = pretty_value(0,offset)
+                            alert.details[target_metric_name] = pretty_value(0,offset)
                         end
+
                     end
                 end
                 
@@ -1144,45 +1122,6 @@ local bucket_alerter = function(alert_channel,graphite_channel)
     end
 end
 
-local graphite_submitter = function(graphite_channel)
-    local self = fiber.self()
-    self:name("ipfix/graphite-submitter")
-
-    local pending = 0
-    local output = ''
-    local conn_info = socket.getaddrinfo(config.graphite_host,'2010')
-    local graphite_host = conn_info[1].host
-    local graphite_port = config.graphite_port
-
-    if not graphite_host or not graphite_port then
-        log.info('Disabling graphite submission, no host or port configured!')
-        return
-    else
-        log.info('Resolved graphite host to ' .. graphite_host .. ':' .. graphite_port)
-    end
-
-    local graphite = socket('AF_INET', 'SOCK_DGRAM', 'udp')
-
-    while 1 == 1 do
-        local to_submit = graphite_channel:get(1.0)
-        if to_submit ~= nil then
-            pending = pending + 1
-            output = output .. tbl_concat(to_submit,' ') .. "\n"
-        end
-
-        if pending >= 5 or to_submit == nil then
-            local sent = graphite:sendto(graphite_host,graphite_port,output)
-            if not sent then
-                log.error('Metric output to Graphite at ' .. graphite_host .. ':' .. graphite_port .. ' failed! - ' .. graphite:error())
-            end
-            pending = 0
-            output  = ''
-            fiber.sleep(0.001)
-        end
-    end
-    graphite:close()
-end
-
 local ipfix_background_saver = function()
     local self = fiber.self()
     self:name("ipfix/background-saver")
@@ -1191,58 +1130,6 @@ local ipfix_background_saver = function()
         fiber.sleep(config.ipfix_tpl_save_interval)
         log.info("Saving IPFIX templates...")
         ipfix.save_templates(config.ipfix_tpl_cache_file)
-    end
-end
-
-local stat_generator = function(graphite_channel)
-    local self = fiber.self()
-    self:name("ipfix/stat-generator")
-
-    while 1 == 1 do
-        local now = math_ceil(fiber.time())
-
-        -- Submit size of each box to graphite
-        for k, v in box.space._space:pairs() do
-            local space_name = v[3]
-            if box.space[space_name].index[0] ~= nil then
-                tuple_count = box.space[space_name].index[0]:count()
-            else
-                tuple_count = 0
-            end
-
-            graphite_channel:put({'flow.stats.space.'..space_name..'.tuple_count',math_ceil(tuple_count),now})
-        end
-
-        for field, value in pairs(box.slab.info()) do
-            if type(value) == "number" then
-                graphite_channel:put({'flow.stats.box.slab.'..field,math_ceil(value),now})
-
-            else
-                if field == 'slabs' then
-                    -- Submit each slab size plus item count and used
-                    for _, slabvar in ipairs(value) do
-                        local stat_path = 'flow.stats.box.slab.slabs.'..tostring(slabvar.item_size)
-                        graphite_channel:put({stat_path .. '.count',slabvar.item_count,now})
-                        graphite_channel:put({stat_path .. '.mem_free',slabvar.mem_free,now})
-                        graphite_channel:put({stat_path .. '.mem_used',slabvar.mem_used,now})
-                        graphite_channel:put({stat_path .. '.slab_count',slabvar.slab_count,now})
-                        graphite_channel:put({stat_path .. '.slab_size',slabvar.slab_size,now})
-                    end
-                end
-            end
-        end
-        for field, value in pairs(box.stat()) do
-            if type(value) == "table" then
-                local field = field:lower()
-                if value.total then
-                    graphite_channel:put({'flow.stats.box.stat.'..field..'.total',math_ceil(value.total),now})
-                end
-                if value.rps then
-                    graphite_channel:put({'flow.stats.box.stat.'..field..'.rps',math_ceil(value.rps),now})
-                end
-            end
-        end
-        fiber.sleep(10)
     end
 end
 
@@ -1256,52 +1143,46 @@ local start_fibers = function()
     local bgsaver, aggregator, monitor, submitter, alerter, statter
     local listeners = {}
 
-    while 1 == 1 do
-        
-        if not bgsaver or bgsaver.status() == 'dead' then
-            log.info('(Re)starting background saver')
-            bgsaver = fiber.create(ipfix_background_saver)
-        end
+    
+    log.info('Starting background saver')
+    bgsaver = fiber.create(ipfix_background_saver)
 
-        -- Write to ipfix_channel
-        for _, port in ipairs(config.ports) do
-            if not listeners[port] or listeners[port].status() == 'dead'  then
-                log.info("(Re)starting IPFIX listener on port " .. port)
-                listeners[port] = fiber.create(ipfix_listener,port,ipfix_channel)
-            end
-        end
+    ipfix_listener.set_config(config)
+    stat_generator.set_config(config)
+    graphite_submitter.set_config(config)
 
-        -- Read from ipfix_channel, write to aggregate_channel
-        if not aggregator or aggregator.status() == 'dead' then
-            log.info('(Re)starting aggregator')
-            aggregator = fiber.create(ipfix_aggregator,ipfix_channel,aggregate_channel) 
+    -- Write to ipfix_channel
+    for _, port in ipairs(config.ports) do
+        if not listeners[port] then
+            log.info("Starting IPFIX listener on port " .. port)
+            listeners[port] = ipfix_listener.start(port,ipfix_channel)
         end
-
-        -- Read from aggregate_channel, write to graphite_channel
-        if not monitor or monitor.status() == 'dead' then
-            log.info('(Re)starting monitor')
-            monitor = fiber.create(bucket_monitor,aggregate_channel,graphite_channel,alert_channel)
-        end
-
-        -- Read from alert_channel
-        if not alerter or alerter.status() == 'dead' then
-            log.info('(Re)starting alerter')
-            alerter = fiber.create(bucket_alerter,alert_channel,graphite_channel)
-        end
-
-        -- Write to graphite_channel
-        if not statter or statter.status() == 'dead' then
-            log.info('(Re)starting graphite statter')
-            statter = fiber.create(stat_generator,graphite_channel)
-        end
-
-        -- Read from graphite_channel
-        if not submitter or submitter.status() == 'dead' then
-            log.info('(Re)starting graphite submitter')
-            submitter = fiber.create(graphite_submitter,graphite_channel)
-        end
-        fiber.sleep(5)
     end
+
+    -- Read from ipfix_channel, write to aggregate_channel
+    if not aggregator or aggregator.status() == 'dead' then
+        aggregator = fiber.create(ipfix_aggregator,ipfix_channel,aggregate_channel) 
+    end
+
+    -- Read from aggregate_channel, write to graphite_channel
+    if not monitor or monitor.status() == 'dead' then
+        log.info('(Re)starting monitor')
+        monitor = fiber.create(bucket_monitor,aggregate_channel,graphite_channel,alert_channel)
+    end
+
+    -- Read from alert_channel
+    if not alerter or alerter.status() == 'dead' then
+        log.info('(Re)starting alerter')
+        alerter = fiber.create(bucket_alerter,alert_channel,graphite_channel)
+    end
+
+    -- Write to graphite_channel
+    log.info('Starting graphite statter')
+    statter = stat_generator.start(graphite_channel)
+
+    -- Read from graphite_channel
+    log.info('Starting graphite submitter')
+    submitter = graphite_submitter.start(graphite_channel)
 end
 
 local start_http_server = function()
@@ -1382,6 +1263,6 @@ bootstrap_db()
 setup_user()
 setup_db()
 load_ipfix()
-fiber.create(start_fibers)
+start_fibers()
 start_http_server()
 

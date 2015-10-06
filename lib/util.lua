@@ -1,4 +1,3 @@
-local util         = require('util')
 local digest       = require('digest')
 local digest_crc32 = digest.crc32
 local digest_guava = digest.guava
@@ -8,10 +7,17 @@ local str_upper    = string.upper
 local str_gsub     = string.gsub
 local table        = require('table')
 local tbl_concat   = table.concat
+local tbl_insert   = table.insert
+local bit          = require('bit')
+local bit_band     = bit.band
 local math         = require('math')
 local math_floor   = math.floor
+local math_ceil    = math.ceil
+local fiber        = require('fiber')
+local fiber_time   = fiber.time
 local _M = {}
 
+local constants    = require("constants")
 local tcp_flags     = constants.tcp_flags
 local proto         = constants.proto
 local direction     = constants.direction
@@ -290,7 +296,7 @@ function _M.avg2tuple(avg)
         avg.stat or '',
         avg.direction,
         avg.values,
-        avg.last_updated or math_ceil(fiber.time()),
+        avg.last_updated or math_ceil(fiber_time()),
     }
 end
 
@@ -301,6 +307,8 @@ function _M.format_alert_details(alert)
         "Condition: %(value_pretty) > %(threshold_pretty)",
         "Peak Target Traffic IN:      %(target_inbound_bps_pretty) / %(target_inbound_pps_pretty) / %(target_inbound_fps_pretty)",
         "Peak Target Traffic OUT:     %(target_outbound_bps_pretty) / %(target_outbound_pps_pretty) / %(target_outbound_fps_pretty)",
+        "Peak Global Traffic IN:      %(global_inbound_bps_pretty) / %(global_inbound_pps_pretty) / %(global_inbound_fps_pretty)",
+        "Peak Global Traffic OUT:     %(global_outbound_bps_pretty) / %(global_outbound_pps_pretty) / %(global_outbound_fps_pretty)",
     },'\n')
     return pretty_format_str % alert.details
 
@@ -372,7 +380,7 @@ function _M.aggregate_stat(store,typ,stat,values)
         
     local storage = store[typ][stat]
     if not storage then
-        storage = get_value_mt()
+        storage = _M.get_value_mt()
     end
 
     for key, value in ipairs(values) do
