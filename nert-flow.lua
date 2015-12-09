@@ -755,12 +755,13 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                 for offset,metric in ipairs(metric_reverse) do
                                     if threshold_values[metric] and threshold_values[metric].abs < avg_values[offset] then 
                                         local broken = {
-                                            metric    = metric,
-                                            stat_type = stat_type,
-                                            stat      = stat,
-                                            value     = avg_values[offset],
-                                            threshold = threshold_values[metric].abs,
-                                            direction = direction,
+                                            metric         = metric,
+                                            stat_type      = stat_type,
+                                            stat           = stat,
+                                            value          = avg_values[offset],
+                                            threshold      = threshold_values[metric].abs,
+                                            direction      = direction,
+                                            threshold_type = 'absolute'
                                         }
                                         alert_channel:put({broken,bucket_stats})
                                     end
@@ -774,12 +775,13 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                             local threshold = (avg_values[long_offset] * (threshold_values[metric].pct / 100))
                                             if avg_values[offset] > threshold then
                                                 local broken = {
-                                                    metric    = metric,
-                                                    stat_type = stat_type,
-                                                    stat      = stat,
-                                                    value     = avg_values[offset],
-                                                    threshold = threshold,
-                                                    direction = direction,
+                                                    metric         = metric,
+                                                    stat_type      = stat_type,
+                                                    stat           = stat,
+                                                    value          = avg_values[offset],
+                                                    threshold      = threshold,
+                                                    direction      = direction,
+                                                    threshold_type = 'heuristic'
                                                 }
                                                 alert_channel:put({broken,bucket_stats})
                                             end

@@ -2,6 +2,7 @@ local fiber     = require("fiber")
 local socket    = require("socket")
 local ipfix     = require("ipfix")
 local constants = require("constants")
+local lp        = require("logprint")
 
 local proto = constants.proto
 
