@@ -148,6 +148,7 @@ local load_config = function()
     config.thresholds                 = config.thresholds or {}
     config.attack_protocol_ratio      = config.attack_protocol_ratio or 0.9
     config.max_flow_packet_length     = config.max_flow_packet_length or 8192
+    config.ignore_subnets             = config.ignore_subnets or {}
     
     -- Create reverse lookup structures for 'constants'
     -- Also create iterable structures for 'constants' which 
@@ -175,6 +176,12 @@ local load_config = function()
             ip_addr_reverse[i] = ip_address
         end
         tbl_insert(config.integer_subnets,{sub_lo,sub_high,subnet})
+    end
+
+    config.integer_ignore_subnets = {}
+    for _,subnet in ipairs(config.ignore_subnets) do
+        local sub_lo, sub_high = ip.cidr_to_integer_range(subnet)
+        tbl_insert(config.integer_ignore_subnets,{sub_lo,sub_high,subnet})
     end
 
     events.set_config(config)
@@ -361,6 +368,7 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
     local metric_fps = metric.fps
 
     local known_subnets = config.integer_subnets
+    local ignore_subnets = config.integer_ignore_subnets
 
     local bucket = {}
     local last_bucket_time = 0
@@ -443,26 +451,38 @@ local ipfix_aggregator = function(ipfix_channel,aggregate_channel)
 
                 local subnet, flow_dir, ip, flags, icmp_typecode
 
-                if dst_subnet ~= nil then
-                    flow_dir = direction.inbound
-                    subnet   = dst_subnet
-                    ip       = dst_ip
-                elseif src_subnet ~= nil then
-                    flow_dir = direction.outbound
-                    subnet   = src_subnet
-                    ip       = src_ip
+                -- If src or dst IP is in ignore subnet list
+                local ignore_src_subnet = in_subnet(src_ip, ignore_subnets)
+                local ignore_dst_subnet = in_subnet(dst_ip, ignore_subnets)
+                
+                if ignore_src_subnet then
+                    lp.dequeue('Flow packet for ignored src subnet ' .. ignore_src_subnet .. ' detected, ignoring...')
+                elseif ignore_dst_subnet then
+                    lp.dequeue('Flow packet for ignored dst subnet ' .. ignore_dst_subnet .. ' detected, ignoring...')
                 else
-                    if src_as == 0 then
-                        flow_dir = direction.outbound
-                        subnet   = src_subnet
-                        ip       = src_ip
-                    elseif dst_as == 0 then
+
+                    if dst_subnet ~= nil then
                         flow_dir = direction.inbound
                         subnet   = dst_subnet
                         ip       = dst_ip
+                    elseif src_subnet ~= nil then
+                        flow_dir = direction.outbound
+                        subnet   = src_subnet
+                        ip       = src_ip
                     else
-                        log.error('Could not calculate flow direction for ' .. src_ip .. ' -> ' .. dst_ip .. ', ignoring...')
+                        if src_as == 0 then
+                            flow_dir = direction.outbound
+                            subnet   = src_subnet
+                            ip       = src_ip
+                        elseif dst_as == 0 then
+                            flow_dir = direction.inbound
+                            subnet   = dst_subnet
+                            ip       = dst_ip
+                        else
+                            log.error('Could not calculate flow direction for ' .. src_ip .. ' -> ' .. dst_ip .. ', ignoring...')
+                        end
                     end
+
                 end
 
                 if flow_dir then
@@ -781,7 +801,8 @@ local bucket_monitor = function(aggregate_channel,graphite_channel,alert_channel
                                                     value          = avg_values[offset],
                                                     threshold      = threshold,
                                                     direction      = direction,
-                                                    threshold_type = 'heuristic'
+                                                    threshold_type = 'heuristic',
+                                                    threshold_pct  = threshold_values[metric].pct
                                                 }
                                                 alert_channel:put({broken,bucket_stats})
                                             end
@@ -869,6 +890,8 @@ local bucket_alerter = function(alert_channel,graphite_channel)
                     alert.notified_start = false
                     alert.notified_end   = false
                     alert.details.metric = alert.metric
+                    alert.details.threshold_type = alert.threshold_type
+                    alert.details.threshold_pct  = alert.threshold_pct
                     alert.details.id = digest.crc32(tbl_concat({
                         alert.direction,
                         alert.target_type,
